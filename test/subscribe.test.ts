@@ -435,3 +435,51 @@ describe('re-sync on init', () => {
     expect(await init(opts, reload.runtime)).toEqual({ supported: true });
   });
 });
+
+describe('concurrent subscribe', () => {
+  it('shares one subscription when init re-syncs while the visitor enables', async () => {
+    // A visitor who opted in earlier, whose browser subscription is gone.
+    const first = setup({ permission: 'granted' });
+    await first.store.set(DEVICE_KEY, {
+      id: 'dev_0',
+      appId: 'app_1',
+      endpoint: 'https://push.example.com/send/old',
+      p256dh: 'p',
+      auth: 'a',
+      publicKey: PUBLIC_KEY,
+    });
+    // The browser takes a moment to subscribe and, like Chrome, hands each
+    // concurrent call its own endpoint while none exists yet.
+    let calls = 0;
+    first.browser.subscribe.mockImplementation(async () => {
+      calls += 1;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return fakeSubscription(`https://push.example.com/send/new-${calls}`);
+    });
+
+    const initial = init(opts, first.runtime);
+    await vi.waitFor(() => expect(getState()).not.toBeNull(), { interval: 1 });
+    const [, result] = await Promise.all([
+      initial,
+      requestPermission(first.runtime),
+    ]);
+
+    expect(result.registered).toBe(true);
+    expect(first.browser.subscribe).toHaveBeenCalledTimes(1);
+    const posts = first.requests.filter(
+      (r) => r.method === 'POST' && r.url.endsWith('/devices')
+    );
+    expect(posts).toHaveLength(1);
+  });
+
+  it('lets a later call register again once the first one finished', async () => {
+    const { browser, runtime } = setup({ permission: 'granted' });
+    await init(opts, runtime);
+    await requestPermission(runtime);
+    await requestPermission(runtime);
+    expect(browser.subscribe).toHaveBeenCalledTimes(1);
+    browser.setExisting(null);
+    await requestPermission(runtime);
+    expect(browser.subscribe).toHaveBeenCalledTimes(2);
+  });
+});

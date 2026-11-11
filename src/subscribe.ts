@@ -113,7 +113,7 @@ async function obtainSubscription(
 }
 
 /** Subscribes and registers; never throws. */
-async function subscribeAndRegister(
+async function registerBrowser(
   state: SdkState,
   runtime: Runtime
 ): Promise<PermissionResult> {
@@ -145,6 +145,27 @@ async function subscribeAndRegister(
         : 'register_failed';
     return { permission: 'granted', registered: false, reason };
   }
+}
+
+let inFlight: { state: SdkState; result: Promise<PermissionResult> } | null =
+  null;
+
+/**
+ * Runs one subscribe-and-register at a time per init. `init` (re-sync) and
+ * `requestPermission` can overlap, and a browser with no subscription hands
+ * each concurrent `subscribe()` its own endpoint, which would register two
+ * Devices for one visitor. The second caller waits for the first one's result.
+ */
+function subscribeAndRegister(
+  state: SdkState,
+  runtime: Runtime
+): Promise<PermissionResult> {
+  if (inFlight && inFlight.state === state) return inFlight.result;
+  const result = registerBrowser(state, runtime).finally(() => {
+    if (inFlight?.result === result) inFlight = null;
+  });
+  inFlight = { state, result };
+  return result;
 }
 
 /**
