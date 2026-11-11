@@ -6,8 +6,8 @@ encryption (RFC 8291).
 
 > **Status: in development. Not published.**
 >
-> **npm package name: TBD.** The name is not confirmed yet, so `package.json` is `private` and nothing
-> can be published by accident. Do not install this from npm until this line changes.
+> **npm package name: `notti-web-sdk`.** It is not published yet: `package.json` is `private` so nothing
+> can be published by accident. Until the first release, build it from this repository.
 
 ## Usage
 
@@ -17,7 +17,7 @@ encryption (RFC 8291).
 2. **Initialize** when the page loads. It never prompts and never throws:
 
    ```js
-   import { Notti } from '<package name: TBD>';
+   import { Notti } from 'notti-web-sdk';
 
    const { supported, reason } = await Notti.init({
      appId: 'YOUR_APP_ID',

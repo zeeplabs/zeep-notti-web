@@ -25,6 +25,6 @@ All four must pass before reporting a task done.
 - Conventional Commits, enforced by commitlint through lefthook. Never `--no-verify`.
 - Never log tokens, endpoints, keys or any end-user data.
 - No credentials in the repo; samples use placeholders.
-- Do not publish. The npm package name is undecided (`private: true`).
+- Do not publish. The npm package is `notti-web-sdk`, kept `private: true` until a release is approved.
 - Tests verify behavior with mocked browser globals; the worker is tested with a fake
   `ServiceWorkerGlobalScope`.
