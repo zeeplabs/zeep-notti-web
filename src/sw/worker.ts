@@ -1,4 +1,7 @@
 import type { ApiConfig, Fetcher } from '../api';
+import { base64UrlToBytes } from '../base64';
+import { ensureRegistered, readSubscription } from '../register';
+import type { Runtime } from '../runtime';
 import { reportEvent, type EventType } from '../events';
 import type { Sleep } from '../retry';
 import {
@@ -34,6 +37,15 @@ export interface WorkerScope {
       title: string,
       options?: Record<string, unknown>
     ): Promise<void>;
+    pushManager: {
+      permissionState(options: {
+        userVisibleOnly: boolean;
+      }): Promise<'granted' | 'denied' | 'prompt'>;
+      subscribe(options: {
+        userVisibleOnly: boolean;
+        applicationServerKey: Uint8Array<ArrayBuffer>;
+      }): Promise<unknown>;
+    };
   };
   clients: {
     matchAll(options: {
@@ -62,6 +74,10 @@ interface PushEventLike extends ExtendableEventLike {
 
 interface ClickEventLike extends ExtendableEventLike {
   notification: { data?: unknown; close(): void };
+}
+
+interface SubscriptionChangeEventLike extends ExtendableEventLike {
+  newSubscription?: unknown;
 }
 
 interface MessageEventLike {
@@ -299,6 +315,63 @@ export function installWorker(scope: WorkerScope, deps: WorkerDeps): void {
         await clicked;
       })()
     );
+  });
+
+  /**
+   * The browser dropped or replaced the subscription. Resubscribe when the
+   * visitor's permission still stands and register the new endpoint. The
+   * Device API cannot change a Device's token with a PATCH (the token is the
+   * proof of ownership), so the new endpoint is registered with a POST, which
+   * is an upsert, and the stored profile rides along. Every failure is
+   * swallowed: the page repeats this check on its next init.
+   */
+  async function resubscribe(provided: unknown): Promise<void> {
+    try {
+      const config = await deps.store.get<StoredConfig>(CONFIG_KEY);
+      const device = await deps.store.get<StoredDevice>(DEVICE_KEY);
+      if (!config || !device || device.appId !== config.appId) return;
+
+      const { pushManager } = scope.registration;
+      const permission = await pushManager.permissionState({
+        userVisibleOnly: true,
+      });
+      if (permission !== 'granted') return;
+
+      const subscription =
+        provided ??
+        (await pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: base64UrlToBytes(config.publicKey),
+        }));
+      const read = readSubscription(subscription as PushSubscription);
+      if (!read) return;
+
+      const runtime: Runtime = {
+        env: {},
+        fetch: deps.fetch,
+        store: deps.store,
+        sleep: deps.sleep,
+      };
+      await ensureRegistered(
+        {
+          config: {
+            appId: config.appId,
+            clientKey: config.clientKey,
+            host: config.host,
+          },
+          publicKey: config.publicKey,
+          serviceWorkerPath: '',
+        },
+        runtime,
+        read
+      );
+    } catch {
+      // Retried by the page at its next init.
+    }
+  }
+
+  on<SubscriptionChangeEventLike>(scope, 'pushsubscriptionchange', (event) => {
+    event.waitUntil(resubscribe(event.newSubscription));
   });
 
   // The page asks which version is running to detect a stale worker.

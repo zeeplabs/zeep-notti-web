@@ -51,7 +51,7 @@ export async function ensureRegistered(
   ) {
     // Nothing to register, but a profile change that failed earlier is still
     // owed to the server.
-    await flushProfile(runtime, stored);
+    await flushProfile(runtime, state.config, stored);
     return stored.id;
   }
 
@@ -84,6 +84,6 @@ export async function ensureRegistered(
   await runtime.store.set(DEVICE_KEY, record);
   // A logout that is still pending must reach the server even though the POST
   // omitted external_user_id (an omitted id keeps the stored one).
-  await flushProfile(runtime, record);
+  await flushProfile(runtime, state.config, record);
   return id;
 }

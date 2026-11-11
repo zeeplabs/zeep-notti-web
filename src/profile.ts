@@ -52,10 +52,10 @@ async function registeredDevice(
  */
 export async function flushProfile(
   runtime: Runtime,
+  config: ApiConfig,
   device: StoredDevice
 ): Promise<void> {
-  const state = getState();
-  if (!state || state.config.appId !== device.appId) return;
+  if (config.appId !== device.appId) return;
   try {
     const profile = await load(runtime);
     if (profile.pending.length === 0) return;
@@ -66,13 +66,7 @@ export async function flushProfile(
     if (profile.pending.includes('tags')) fields['tags'] = profile.tags;
     await withRetry(
       () =>
-        patchDevice(
-          runtime.fetch,
-          state.config,
-          device.id,
-          device.endpoint,
-          fields
-        ),
+        patchDevice(runtime.fetch, config, device.id, device.endpoint, fields),
       runtime.sleep
     );
     // Re-read: the host may have changed the profile while the request ran.
@@ -125,15 +119,20 @@ async function applyAndSync(
   field: PendingField,
   change: (profile: StoredProfile) => void
 ): Promise<void> {
-  const device = await exclusive(async () => {
+  const target = await exclusive(async () => {
     const profile = await load(runtime);
     change(profile);
     markPending(profile, field);
     await runtime.store.set(PROFILE_KEY, profile);
     const state = getState();
-    return state ? registeredDevice(runtime, state.config) : undefined;
+    return state
+      ? {
+          device: await registeredDevice(runtime, state.config),
+          config: state.config,
+        }
+      : undefined;
   });
-  if (device) await flushProfile(runtime, device);
+  if (target?.device) await flushProfile(runtime, target.config, target.device);
 }
 
 /**

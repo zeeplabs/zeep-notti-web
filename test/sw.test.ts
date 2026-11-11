@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { memoryStore, CONFIG_KEY, DEVICE_KEY, type Store } from '../src/store';
+import { fakeSubscription } from './helpers';
+import {
+  memoryStore,
+  CONFIG_KEY,
+  DEVICE_KEY,
+  PROFILE_KEY,
+  type Store,
+  type StoredDevice,
+} from '../src/store';
 import {
   VERSION_REQUEST,
   WORKER_VERSION,
@@ -32,8 +40,12 @@ interface Harness {
   matchAll: ReturnType<typeof vi.fn>;
   showNotification: ReturnType<typeof vi.fn>;
   store: Store;
-  fetchImpl: { current: () => Promise<Response> };
+  fetchImpl: { current: (url: string) => Promise<Response> };
   sleeps: number[];
+  pushManager: {
+    permissionState: ReturnType<typeof vi.fn>;
+    subscribe: ReturnType<typeof vi.fn>;
+  };
 }
 
 async function harness(
@@ -71,13 +83,22 @@ async function harness(
   const openWindow = vi.fn(async () => ({}));
   const matchAll = vi.fn(async () => windows);
   const fetchImpl = {
-    current: async () => jsonResponse(201, { id: 'ev' }),
+    current: async (url: string): Promise<Response> =>
+      url.endsWith('/devices')
+        ? jsonResponse(201, { id: 'dev_2' })
+        : jsonResponse(201, { id: 'ev' }),
+  };
+  const pushManager = {
+    permissionState: vi.fn(async () => 'granted' as const),
+    subscribe: vi.fn(async () =>
+      fakeSubscription('https://push.example.com/send/new1')
+    ),
   };
 
   const scope: WorkerScope = {
     addEventListener: (type, listener) => listeners.set(type, listener),
     skipWaiting: vi.fn(async () => undefined),
-    registration: { showNotification },
+    registration: { showNotification, pushManager },
     clients: { matchAll, openWindow, claim: vi.fn(async () => undefined) },
     location: { origin: ORIGIN, hostname: 'site.example' },
   };
@@ -94,7 +115,7 @@ async function harness(
         raw: String(init?.body),
         headers: { ...((init?.headers as Record<string, string>) ?? {}) },
       });
-      return fetchImpl.current();
+      return fetchImpl.current(String(input));
     },
   });
   return {
@@ -110,6 +131,7 @@ async function harness(
     store,
     fetchImpl,
     sleeps,
+    pushManager,
   };
 }
 
@@ -487,5 +509,133 @@ describe('resolveClickTarget', () => {
         sameOrigin: true,
       });
     }
+  });
+});
+
+describe('pushsubscriptionchange', () => {
+  const NEW_ENDPOINT = 'https://push.example.com/send/new1';
+  const writes = (h: Harness) =>
+    h.fetches.map((f) => ({ url: f.url, body: JSON.parse(f.raw) }));
+
+  it('registers the new subscription the browser hands over', async () => {
+    const h = await harness();
+    const newSub = fakeSubscription(NEW_ENDPOINT);
+    await dispatch(h, 'pushsubscriptionchange', {
+      newSubscription: newSub,
+    }).settled();
+
+    expect(h.pushManager.subscribe).not.toHaveBeenCalled();
+    const [post, patch] = writes(h);
+    expect(post?.url).toBe('https://app.zeepnotti.app/v1/apps/app_1/devices');
+    expect(post?.body).toEqual({
+      token: NEW_ENDPOINT,
+      platform: 'web',
+      keys: { p256dh: 'p256dh-new1', auth: 'auth-new1' },
+    });
+    expect(patch?.url).toBe(
+      'https://app.zeepnotti.app/v1/apps/app_1/devices/dev_2'
+    );
+    expect(patch?.body).toMatchObject({ token: NEW_ENDPOINT, sdk_name: 'web' });
+    expect(await h.store.get<StoredDevice>(DEVICE_KEY)).toMatchObject({
+      id: 'dev_2',
+      endpoint: NEW_ENDPOINT,
+    });
+  });
+
+  it('subscribes with the stored App key when none is handed over', async () => {
+    const h = await harness();
+    await h.store.set(CONFIG_KEY, {
+      appId: 'app_1',
+      clientKey: 'ck_test',
+      host: 'https://app.zeepnotti.app',
+      publicKey: 'BAE',
+    });
+    await dispatch(h, 'pushsubscriptionchange', {}).settled();
+    expect(h.pushManager.subscribe).toHaveBeenCalledTimes(1);
+    const arg = h.pushManager.subscribe.mock.calls[0]?.[0] as {
+      userVisibleOnly: boolean;
+      applicationServerKey: Uint8Array;
+    };
+    expect(arg.userVisibleOnly).toBe(true);
+    expect(Array.from(arg.applicationServerKey)).toEqual([4, 1]);
+    expect(writes(h)[0]?.body).toMatchObject({ token: NEW_ENDPOINT });
+  });
+
+  it('carries the stored identity and tags in the new registration', async () => {
+    const h = await harness();
+    await h.store.set(PROFILE_KEY, {
+      external_user_id: 'u1',
+      tags: { plan: 'pro' },
+      pending: [],
+    });
+    await dispatch(h, 'pushsubscriptionchange', {
+      newSubscription: fakeSubscription(NEW_ENDPOINT),
+    }).settled();
+    expect(writes(h)[0]?.body).toMatchObject({
+      external_user_id: 'u1',
+      tags: { plan: 'pro' },
+    });
+  });
+
+  it.each(['denied', 'prompt'] as const)(
+    'does nothing when permission is %s',
+    async (state) => {
+      const h = await harness();
+      h.pushManager.permissionState.mockResolvedValue(state);
+      await dispatch(h, 'pushsubscriptionchange', {
+        newSubscription: fakeSubscription(NEW_ENDPOINT),
+      }).settled();
+      expect(h.pushManager.subscribe).not.toHaveBeenCalled();
+      expect(h.fetches).toHaveLength(0);
+    }
+  );
+
+  it('does nothing when the visitor never opted in', async () => {
+    const h = await harness({ configured: false });
+    await dispatch(h, 'pushsubscriptionchange', {
+      newSubscription: fakeSubscription(NEW_ENDPOINT),
+    }).settled();
+    expect(h.pushManager.permissionState).not.toHaveBeenCalled();
+    expect(h.fetches).toHaveLength(0);
+  });
+
+  it('makes no request when the endpoint did not change', async () => {
+    const h = await harness();
+    await dispatch(h, 'pushsubscriptionchange', {
+      newSubscription: fakeSubscription(ENDPOINT, undefined, {
+        p256dh: 'p',
+        auth: 'a',
+      }),
+    }).settled();
+    expect(h.fetches).toHaveLength(0);
+  });
+
+  it('never rejects when subscribing or registering fails', async () => {
+    const h = await harness();
+    h.pushManager.subscribe.mockRejectedValueOnce(new Error('AbortError'));
+    await expect(
+      dispatch(h, 'pushsubscriptionchange', {}).settled()
+    ).resolves.toBeDefined();
+    expect(h.fetches).toHaveLength(0);
+
+    h.fetchImpl.current = async () => jsonResponse(422, {});
+    await expect(
+      dispatch(h, 'pushsubscriptionchange', {
+        newSubscription: fakeSubscription(NEW_ENDPOINT),
+      }).settled()
+    ).resolves.toBeDefined();
+    expect((await h.store.get<StoredDevice>(DEVICE_KEY))?.endpoint).toBe(
+      ENDPOINT
+    );
+  });
+
+  it('ignores a subscription without keys', async () => {
+    const h = await harness();
+    await dispatch(h, 'pushsubscriptionchange', {
+      newSubscription: fakeSubscription(NEW_ENDPOINT, undefined, {
+        p256dh: 'x',
+      }),
+    }).settled();
+    expect(h.fetches).toHaveLength(0);
   });
 });
