@@ -1,16 +1,22 @@
 import type { ApiConfig, Fetcher } from './api';
 import { browserEnv, type BrowserEnv } from './capabilities';
+import { realSleep, type Sleep } from './retry';
+import { idbStore, type Store } from './store';
 
 /** Everything the SDK touches outside its own code, injectable for tests. */
 export interface Runtime {
   env: BrowserEnv;
   fetch: Fetcher;
+  store: Store;
+  sleep: Sleep;
 }
 
 export function defaultRuntime(): Runtime {
   return {
     env: browserEnv(),
     fetch: (input, init) => globalThis.fetch(input, init),
+    store: idbStore(),
+    sleep: realSleep,
   };
 }
 

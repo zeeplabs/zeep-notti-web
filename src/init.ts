@@ -1,6 +1,8 @@
 import { ApiError, getWebPushConfig, normalizeHost } from './api';
 import { detectSupport, type SupportResult } from './capabilities';
 import { defaultRuntime, setState, type Runtime } from './runtime';
+import { CONFIG_KEY, type StoredConfig } from './store';
+import { syncSubscription } from './subscribe';
 
 export interface InitOptions {
   /** The Notti App ID. */
@@ -51,10 +53,21 @@ export async function init(
     return { supported: false, reason: 'request_failed' };
   }
 
-  setState({
+  const state = {
     config,
     publicKey,
     serviceWorkerPath: options.serviceWorkerPath ?? DEFAULT_SERVICE_WORKER_PATH,
-  });
+  };
+  setState(state);
+
+  // The service worker reads this to report events and refresh the Device.
+  try {
+    const stored: StoredConfig = { ...config, publicKey };
+    await runtime.store.set(CONFIG_KEY, stored);
+  } catch {
+    // Storage can be unavailable; the page-side SDK still works.
+  }
+
+  await syncSubscription(state, runtime);
   return { supported: true };
 }

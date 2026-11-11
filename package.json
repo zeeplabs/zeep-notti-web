@@ -51,6 +51,7 @@
     "@types/node": "^24.0.0",
     "eslint": "^9.39.4",
     "eslint-config-prettier": "^10.1.8",
+    "fake-indexeddb": "^6.2.8",
     "jsdom": "^26.1.0",
     "lefthook": "^2.1.9",
     "prettier": "^3.8.3",
