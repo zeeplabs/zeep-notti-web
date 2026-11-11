@@ -12,6 +12,10 @@ const port = Number(process.env.PORT ?? 5173);
 // The worker must be served from the root so its scope covers the whole site.
 const files = {
   '/': [join(here, 'index.html'), 'text/html; charset=utf-8'],
+  '/manifest.webmanifest': [
+    join(here, 'manifest.webmanifest'),
+    'application/manifest+json',
+  ],
   '/main.js': [join(here, 'main.js'), 'text/javascript; charset=utf-8'],
   '/sdk/index.js': [join(dist, 'index.js'), 'text/javascript; charset=utf-8'],
   '/notti-sw.js': [join(dist, 'notti-sw.js'), 'text/javascript; charset=utf-8'],

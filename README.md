@@ -72,7 +72,9 @@ pnpm example   # http://localhost:5173
 ```
 
 The sample asks for the Notti host, App ID and Client key, then walks through init, enable, identify,
-tags and logout. It is served over `localhost`, which browsers treat as a secure context.
+tags and logout. It is served over `localhost`, which browsers treat as a secure context. It also
+serves a web app manifest (`display: standalone`), which iOS requires before a site added to the Home
+Screen can receive push.
 
 ## Development
 

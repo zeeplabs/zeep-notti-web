@@ -1,0 +1,8 @@
+{
+  "name": "Notti Web SDK sample",
+  "short_name": "Notti sample",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff"
+}
