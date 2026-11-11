@@ -216,6 +216,19 @@ describe('service worker readiness', () => {
     expect(browser.subscribe).toHaveBeenCalledTimes(1);
   });
 
+  it('asks for a newer worker file but still registers when the worker is stale', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { browser, runtime } = setup({
+      activeOnRegister: true,
+      workerVersion: '0.0.0-old',
+    });
+    await init(opts, runtime);
+    expect((await requestPermission(runtime)).registered).toBe(true);
+    expect(browser.update).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+
   it('gives up with subscribe_failed when the worker never becomes ready', async () => {
     vi.useFakeTimers();
     const { runtime } = setup({ readyNeverSettles: true });

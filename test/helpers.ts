@@ -1,5 +1,6 @@
 import { vi } from 'vitest';
 import { bytesToBase64Url, base64UrlToBytes } from '../src/base64';
+import { SDK_VERSION } from '../src/version';
 import type { BrowserEnv } from '../src/capabilities';
 import type { Runtime } from '../src/runtime';
 import { memoryStore, type Store } from '../src/store';
@@ -119,6 +120,8 @@ export interface FakeBrowserOptions {
   created?: FakeSubscription;
   /** Make `requestPermission` use the callback-only (old Safari) form. */
   callbackOnly?: boolean;
+  /** Version the running worker reports (default: the SDK's own). */
+  workerVersion?: string;
   /** `register()` returns an already-active registration (default false). */
   activeOnRegister?: boolean;
   /** `navigator.serviceWorker.ready` never settles (page out of scope). */
@@ -134,6 +137,8 @@ export interface FakeBrowser {
   register: ReturnType<typeof vi.fn>;
   getSubscription: ReturnType<typeof vi.fn>;
   subscribe: ReturnType<typeof vi.fn>;
+  /** `registration.update`, called when the worker is stale. */
+  update: ReturnType<typeof vi.fn>;
   /** Replace what the browser currently holds. */
   setExisting(sub: FakeSubscription | null): void;
 }
@@ -163,8 +168,17 @@ export function fakeBrowser(options: FakeBrowserOptions = {}): FakeBrowser {
     existing = created;
     return created;
   });
+  // A running worker that answers the version handshake like notti-sw.js.
+  const activeWorker = {
+    postMessage: (_message: unknown, transfer: MessagePort[]) => {
+      transfer[0]?.postMessage({
+        version: options.workerVersion ?? SDK_VERSION,
+      });
+    },
+  };
   const registration = {
-    active: options.activeOnRegister ? {} : null,
+    active: options.activeOnRegister ? activeWorker : null,
+    update: vi.fn(async () => undefined),
     pushManager: { getSubscription, subscribe },
   };
   const register = vi.fn(async () => registration);
@@ -177,6 +191,7 @@ export function fakeBrowser(options: FakeBrowserOptions = {}): FakeBrowser {
     register,
     getSubscription,
     subscribe,
+    update: registration.update,
     setExisting: (sub) => {
       existing = sub;
     },

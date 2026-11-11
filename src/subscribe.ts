@@ -1,6 +1,7 @@
 import { ApiError } from './api';
 import { base64UrlToBytes, bytesEqual } from './base64';
 import { ensureRegistered, readSubscription } from './register';
+import { ensureFreshWorker } from './worker-version';
 import { getState, type Runtime, type SdkState } from './runtime';
 import { DEVICE_KEY, type StoredDevice } from './store';
 
@@ -86,6 +87,7 @@ async function obtainSubscription(
   const registration = registered.active
     ? registered
     : await withTimeout(sw.ready, READY_TIMEOUT_MS);
+  await ensureFreshWorker(registration);
   const key = base64UrlToBytes(state.publicKey);
 
   const existing = await registration.pushManager.getSubscription();

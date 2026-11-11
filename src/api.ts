@@ -1,7 +1,7 @@
 /** Default Notti host; override with `host` for a self-hosted instance. */
 export const DEFAULT_HOST = 'https://app.zeepnotti.app';
 
-const REQUEST_TIMEOUT_MS = 10_000;
+export const REQUEST_TIMEOUT_MS = 10_000;
 
 export interface ApiConfig {
   appId: string;
@@ -58,10 +58,11 @@ export async function request(
   config: ApiConfig,
   method: 'GET' | 'POST' | 'PATCH',
   path: string,
-  body?: unknown
+  body?: unknown,
+  timeoutMs: number = REQUEST_TIMEOUT_MS
 ): Promise<unknown> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const headers: Record<string, string> = {
       Authorization: `Bearer ${config.clientKey}`,
