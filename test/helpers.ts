@@ -25,6 +25,8 @@ export interface RecordedRequest {
   method: string;
   headers: Record<string, string>;
   body: unknown;
+  /** The exact bytes sent, for wire-format assertions. */
+  raw: string | undefined;
 }
 
 export function jsonResponse(status: number, body: unknown): Response {
@@ -62,6 +64,7 @@ export function fakeRuntime(
         method: init?.method ?? 'GET',
         headers: { ...((init?.headers as Record<string, string>) ?? {}) },
         body: init?.body ? JSON.parse(String(init.body)) : undefined,
+        raw: init?.body ? String(init.body) : undefined,
       };
       requests.push(req);
       return respond(req);

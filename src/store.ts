@@ -93,3 +93,13 @@ export interface StoredDevice {
 
 export const CONFIG_KEY = 'config';
 export const DEVICE_KEY = 'device';
+
+/** Profile fields the host set; sent now if registered, else at registration. */
+export interface StoredProfile {
+  external_user_id?: string;
+  tags: Record<string, string | number | boolean>;
+  /** Fields not yet acknowledged by the server. */
+  pending: ('external_user_id' | 'tags')[];
+}
+
+export const PROFILE_KEY = 'profile';
