@@ -29,7 +29,8 @@
     "build": "rm -rf dist && tsup",
     "typecheck": "tsc",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "example": "node examples/basic/server.mjs"
   },
   "keywords": [
     "push",

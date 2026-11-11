@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Notti Web SDK sample</title>
+    <style>
+      body {
+        font:
+          16px/1.5 system-ui,
+          sans-serif;
+        margin: 2rem auto;
+        max-width: 40rem;
+        padding: 0 1rem;
+      }
+      label {
+        display: block;
+        margin: 0.75rem 0 0.25rem;
+        font-weight: 600;
+      }
+      input {
+        width: 100%;
+        padding: 0.4rem;
+        box-sizing: border-box;
+      }
+      button {
+        margin: 0.5rem 0.5rem 0 0;
+        padding: 0.4rem 0.9rem;
+      }
+      pre {
+        background: #f4f4f5;
+        padding: 0.75rem;
+        overflow: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Notti Web SDK sample</h1>
+    <p>
+      Point it at a Notti instance with web push enabled for the App, then
+      initialize, enable notifications and send a push from the dashboard.
+    </p>
+
+    <label for="host">Notti host</label>
+    <input id="host" value="http://localhost:8080" />
+    <label for="appId">App ID</label>
+    <input id="appId" autocomplete="off" />
+    <label for="clientKey">Client key</label>
+    <input id="clientKey" autocomplete="off" />
+
+    <p>
+      <button id="init">1. Init</button>
+      <button id="enable">2. Enable notifications</button>
+      <button id="refresh">Refresh state</button>
+    </p>
+
+    <label for="userId">External user id</label>
+    <input id="userId" autocomplete="off" />
+    <p>
+      <button id="identify">Identify</button>
+      <button id="tag">Set tag plan=pro</button>
+      <button id="logout">Logout</button>
+    </p>
+
+    <h2>State</h2>
+    <pre id="state">not initialized</pre>
+
+    <script type="module" src="/main.js"></script>
+  </body>
+</html>
