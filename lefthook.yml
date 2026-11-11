@@ -1,0 +1,13 @@
+pre-commit:
+  parallel: true
+  commands:
+    lint:
+      glob: "*.{js,mjs,ts}"
+      run: npx eslint {staged_files}
+    types:
+      glob: "*.ts"
+      run: npx tsc
+commit-msg:
+  commands:
+    commitlint:
+      run: npx commitlint --edit

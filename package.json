@@ -1,0 +1,74 @@
+{
+  "name": "notti-web",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Official Web SDK for Notti push notifications (Web Push + VAPID)",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./sw": "./dist/notti-sw.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsup",
+    "typecheck": "tsc",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "keywords": [
+    "push",
+    "web-push",
+    "notifications",
+    "vapid",
+    "service-worker"
+  ],
+  "author": "Zeep Tecnologia <opensource@zeeplabs.com.br> (https://github.com/zeeplabs)",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@10.15.0",
+  "devDependencies": {
+    "@commitlint/cli": "^21.2.4",
+    "@commitlint/config-conventional": "^21.2.4",
+    "@eslint/js": "^9.39.4",
+    "@types/node": "^24.0.0",
+    "eslint": "^9.39.4",
+    "eslint-config-prettier": "^10.1.8",
+    "jsdom": "^26.1.0",
+    "lefthook": "^2.1.9",
+    "prettier": "^3.8.3",
+    "tsup": "^8.5.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.46.0",
+    "vitest": "^3.2.4"
+  },
+  "prettier": {
+    "quoteProps": "consistent",
+    "singleQuote": true,
+    "tabWidth": 2,
+    "trailingComma": "es5",
+    "useTabs": false
+  },
+  "commitlint": {
+    "extends": [
+      "@commitlint/config-conventional"
+    ]
+  }
+}
