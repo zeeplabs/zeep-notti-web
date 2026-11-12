@@ -89,10 +89,22 @@ export interface StoredDevice {
   p256dh: string;
   auth: string;
   publicKey: string;
+  /**
+   * False while the sdk_name/sdk_version PATCH that follows the registration
+   * has not been acknowledged, so the next init repeats it. A record written
+   * by 0.1.0 has no flag and counts as acknowledged.
+   */
+  sdkSynced?: boolean;
+}
+
+/** Set when the visitor opted in through `requestPermission`, whatever came next. */
+export interface StoredOptIn {
+  appId: string;
 }
 
 export const CONFIG_KEY = 'config';
 export const DEVICE_KEY = 'device';
+export const OPT_IN_KEY = 'optin';
 
 /** Profile fields the host set; sent now if registered, else at registration. */
 export interface StoredProfile {
