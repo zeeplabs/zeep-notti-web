@@ -3,6 +3,7 @@ import { init } from '../src/init';
 import { getState, setState } from '../src/runtime';
 import { requestPermission } from '../src/subscribe';
 import { DEVICE_KEY, CONFIG_KEY, memoryStore } from '../src/store';
+import { SDK_VERSION } from '../src/version';
 import {
   OTHER_PUBLIC_KEY,
   PUBLIC_KEY,
@@ -91,7 +92,7 @@ describe('requestPermission', () => {
       body: {
         token: ENDPOINT,
         sdk_name: 'web',
-        sdk_version: '0.0.0',
+        sdk_version: SDK_VERSION,
         permission_status: 'granted',
       },
     });

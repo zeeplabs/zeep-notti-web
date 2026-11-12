@@ -4,14 +4,19 @@ Official Web SDK for [Notti](https://github.com/zeeplabs/zeep-notti) push notifi
 browsers through the Web Push protocol (RFC 8030) with VAPID (RFC 8292) and `aes128gcm` payload
 encryption (RFC 8291).
 
-> **Status: in development. Not published.**
->
-> **npm package name: `notti-web-sdk`.** It is not published yet: `package.json` is `private` so nothing
-> can be published by accident. Until the first release, build it from this repository.
+> **Status: `0.x`, first public release.** The API can still change between minor versions. Validated
+> so far on Chrome desktop against a real Notti server and real FCM; Safari, iOS, Chrome Android,
+> Firefox and Edge are not validated yet, and a real click on a notification has not been exercised.
+
+## Install
+
+```sh
+npm install notti-web-sdk
+```
 
 ## Usage
 
-1. **Serve the worker from your own origin, at the root.** Copy `dist/notti-sw.js` to your site as
+1. **Serve the worker from your own origin, at the root.** Copy `node_modules/notti-web-sdk/dist/notti-sw.js` (also exported as `notti-web-sdk/sw`) to your site as
    `/notti-sw.js` (it must be the file shipped with the same SDK version; the SDK warns when they differ).
    Its scope must cover the pages that subscribe.
 2. **Initialize** when the page loads. It never prompts and never throws:
