@@ -204,6 +204,21 @@ describe('layouts and semantics (WIAM-10, WIAM-11)', () => {
     expect(q('.close')?.getAttribute('aria-label')).toBe('Fechar');
   });
 
+  it.each([
+    ['center', true],
+    ['full', true],
+    ['top', false],
+    ['bottom', false],
+  ] as const)('marks a %s message with an image for the close backing: %s', async (format, expected) => {
+    await view().show(message({ format, imageUrl: 'https://cdn.example/a.png' }), handlers().handlers);
+    expect(q('.panel')?.classList.contains('has-image')).toBe(expected);
+  });
+
+  it('does not mark a message without an image', async () => {
+    await view().show(message(), handlers().handlers);
+    expect(q('.panel')?.classList.contains('has-image')).toBe(false);
+  });
+
   it('shows at most two buttons, the first primary', async () => {
     await view().show(message({ buttons: [button('a'), button('b')] }), handlers().handlers);
     const buttons = qa('.btn');

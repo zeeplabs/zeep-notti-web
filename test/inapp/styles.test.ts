@@ -51,6 +51,14 @@ describe('STYLESHEET', () => {
     expect(STYLESHEET).toContain('z-index: 2147483647');
   });
 
+  it('keeps the bar content clear of the close control', () => {
+    expect(STYLESHEET).toMatch(/\.layout-top \.panel,\s*\.layout-bottom \.panel \{[^}]*padding: 14px 56px 14px 16px/);
+  });
+
+  it('backs the close control when it sits over an image', () => {
+    expect(STYLESHEET).toMatch(/\.has-image \.close \{[^}]*background: rgba\(0, 0, 0, 0\.5\)/);
+  });
+
   it('respects the safe areas', () => {
     expect(STYLESHEET).toContain('env(safe-area-inset-top');
     expect(STYLESHEET).toContain('env(safe-area-inset-bottom');

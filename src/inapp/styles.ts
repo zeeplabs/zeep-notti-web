@@ -84,7 +84,8 @@ export const STYLESHEET = `
   align-items: center;
   flex-wrap: wrap;
   gap: 12px;
-  padding: 14px 16px;
+  /* The close control sits at the right edge, 48px wide with its offset: keep content clear of it. */
+  padding: 14px 56px 14px 16px;
 }
 .layout-top .panel { top: calc(env(safe-area-inset-top, 0px) + var(--ni-gap)); }
 .layout-bottom .panel { bottom: calc(env(safe-area-inset-bottom, 0px) + var(--ni-gap)); }
@@ -109,7 +110,9 @@ export const STYLESHEET = `
 .image-button { display: block; padding: 0; margin: 0; border: 0; background: none; cursor: pointer; width: 100%; font: inherit; color: inherit; }
 .layout-top .image-button, .layout-bottom .image-button { width: auto; flex: none; }
 
-.title { margin: 0 0 6px; padding-right: 36px; font-size: 17px; line-height: 1.3; font-weight: 700; }
+.title { margin: 0 0 6px; font-size: 17px; line-height: 1.3; font-weight: 700; }
+/* Whatever comes first (the title, or the body when there is none) stays clear of the close control. */
+.layout-center .text > :first-child, .layout-full .text > :first-child { padding-right: 36px; }
 .body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .tappable { cursor: pointer; }
 
@@ -144,6 +147,8 @@ export const STYLESHEET = `
   cursor: pointer;
 }
 .close svg { width: 18px; height: 18px; stroke: currentColor; stroke-width: 2; fill: none; stroke-linecap: round; }
+
+.has-image .close { background: rgba(0, 0, 0, 0.5); color: #FFFFFF; }
 
 .btn:focus-visible, .close:focus-visible, .image-button:focus-visible, .tappable:focus-visible {
   outline: 2px solid var(--ni-fg);

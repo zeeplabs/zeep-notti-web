@@ -170,6 +170,8 @@ function build(
   }
 
   if (message.imageUrl) {
+    // On a dialog the picture sits under the close control, which then needs its own backing.
+    if (modal) panel.classList.add('has-image');
     const image = element(doc, 'img', 'image');
     image.src = message.imageUrl;
     image.alt = '';
