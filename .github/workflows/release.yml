@@ -42,9 +42,13 @@ jobs:
           node-version-file: .nvmrc
           registry-url: 'https://registry.npmjs.org'
 
-      # Trusted publishing (OIDC) needs npm CLI >= 11.5.1. Do not
-      # `npm install -g npm@latest` here: it can resolve to a major that
-      # needs a newer Node than .nvmrc pins and fail with EBADENGINE.
+      # Trusted publishing (OIDC) needs npm CLI >= 11.5.1, and the npm that
+      # ships with .nvmrc's Node (10.9.x) is older. Pin the major, not `latest`:
+      # a newer major can need a newer Node than .nvmrc pins and fail with
+      # EBADENGINE.
+      - name: Install an npm that supports trusted publishing
+        run: npm install -g npm@11
+
       - name: Check npm version supports trusted publishing
         run: |
           NPM_VERSION=$(npm --version)
