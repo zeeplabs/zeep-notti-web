@@ -11,6 +11,8 @@ export interface Runtime {
   sleep: Sleep;
   /** Milliseconds since the epoch; defaults to `Date.now`. */
   now?: () => number;
+  /** Web Locks, shared by the tabs of one origin; absent where unsupported. */
+  locks?: Pick<LockManager, 'request'>;
 }
 
 export const nowOf = (runtime: Runtime): number =>
@@ -25,6 +27,7 @@ export function defaultRuntime(): Runtime {
     fetch: (input, init) => globalThis.fetch(input, init),
     store: (sharedStore ??= idbStore()),
     sleep: realSleep,
+    locks: globalThis.navigator?.locks,
   };
 }
 

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { init } from '../src/init';
-import { setState } from '../src/runtime';
+import { setState, type Runtime } from '../src/runtime';
 import { requestPermission } from '../src/subscribe';
 import { DEVICE_KEY, memoryStore, type StoredDevice } from '../src/store';
 import {
@@ -54,12 +54,31 @@ async function registered() {
 function reload(
   base: Awaited<ReturnType<typeof registered>>,
   now: number,
-  respond = server()
+  respond = server(),
+  locks?: Runtime['locks']
 ) {
   setState(null);
   const rt = fakeRuntime(respond, base.browser.env, base.store);
   rt.runtime.now = () => now;
+  if (locks) rt.runtime.locks = locks;
   return rt;
+}
+
+/** What the browser's Web Locks gives tabs of one origin: one holder at a time. */
+function sharedLocks(): NonNullable<Runtime['locks']> {
+  let held = false;
+  return {
+    request: async (_name: string, _options: unknown, callback: unknown) => {
+      const run = callback as (lock: unknown) => unknown;
+      if (held) return run(null);
+      held = true;
+      try {
+        return await run({});
+      } finally {
+        held = false;
+      }
+    },
+  } as NonNullable<Runtime['locks']>;
 }
 
 beforeEach(() => setState(null));
@@ -155,9 +174,12 @@ describe('last seen heartbeat', () => {
     await vi.waitFor(() => expect(writes(failing.requests).length).toBe(1));
     // A failed heartbeat is not retried with a back-off that would hold init.
     expect(failing.sleeps).toEqual([]);
-    expect(await base.store.get<StoredDevice>(DEVICE_KEY)).toMatchObject({
-      seenAt: T0,
-    });
+    // The day was claimed for the request and given back when it failed.
+    await vi.waitFor(async () =>
+      expect(await base.store.get<StoredDevice>(DEVICE_KEY)).toMatchObject({
+        seenAt: T0,
+      })
+    );
 
     const next = reload(base, T0 + 2 * DAY + 60_000);
     await init(opts, next.runtime);
@@ -204,5 +226,75 @@ describe('last seen heartbeat', () => {
     await init(opts, rt.runtime);
     await Promise.resolve();
     expect(writes(rt.requests)).toHaveLength(0);
+  });
+
+  it('counts a terminal answer as the attempt of the day, so a deleted device is not retried at every page load', async () => {
+    const base = await registered();
+    const denied = reload(
+      base,
+      T0 + 2 * DAY,
+      server({
+        'PATCH /v1/apps/app_1/devices/dev_1': () =>
+          jsonResponse(403, { error: { code: 'forbidden' } }),
+      })
+    );
+    await init(opts, denied.runtime);
+    await vi.waitFor(() => expect(writes(denied.requests)).toHaveLength(1));
+    await vi.waitFor(async () =>
+      expect(await base.store.get<StoredDevice>(DEVICE_KEY)).toMatchObject({
+        seenAt: T0 + 2 * DAY,
+      })
+    );
+
+    // The record stays: forgetting it would make the browser register again
+    // and bring back a device an operator deleted on purpose.
+    expect(await base.store.get<StoredDevice>(DEVICE_KEY)).toMatchObject({
+      id: 'dev_1',
+    });
+    const sameDay = reload(base, T0 + 2 * DAY + 3_600_000);
+    await init(opts, sameDay.runtime);
+    await Promise.resolve();
+    expect(writes(sameDay.requests)).toHaveLength(0);
+
+    const nextDay = reload(base, T0 + 3 * DAY + 1000);
+    await init(opts, nextDay.runtime);
+    await vi.waitFor(() => expect(writes(nextDay.requests)).toHaveLength(1));
+  });
+
+  it('gives the day back when the request could not reach the server, so the next init tries again', async () => {
+    const base = await registered();
+    const offline = reload(base, T0 + 2 * DAY, (req) => {
+      if (req.method === 'PATCH') throw new TypeError('network down');
+      return server()(req);
+    });
+    await init(opts, offline.runtime);
+    await vi.waitFor(() => expect(writes(offline.requests)).toHaveLength(1));
+    await vi.waitFor(async () =>
+      expect(await base.store.get<StoredDevice>(DEVICE_KEY)).toMatchObject({
+        seenAt: T0,
+      })
+    );
+
+    const next = reload(base, T0 + 2 * DAY + 60_000);
+    await init(opts, next.runtime);
+    await vi.waitFor(() => expect(writes(next.requests)).toHaveLength(1));
+  });
+
+  it('sends one request when several tabs of the site load at the same time', async () => {
+    const base = await registered();
+    const locks = sharedLocks();
+    const tabs = [1, 2, 3].map(() =>
+      reload(base, T0 + 2 * DAY, server(), locks)
+    );
+    await Promise.all(tabs.map((tab) => init(opts, tab.runtime)));
+
+    await vi.waitFor(async () =>
+      expect(await base.store.get<StoredDevice>(DEVICE_KEY)).toMatchObject({
+        seenAt: T0 + 2 * DAY,
+      })
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const sent = tabs.flatMap((tab) => writes(tab.requests));
+    expect(sent).toHaveLength(1);
   });
 });
