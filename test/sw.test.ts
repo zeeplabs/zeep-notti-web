@@ -180,7 +180,12 @@ describe('push', () => {
           body: 'World',
           image: 'https://cdn.example/i.png',
           tag: 'promo',
-          data: { url: '/offers', notification_id: 'n1', delivery_id: 'd1' },
+          data: {
+            url: '/offers',
+            notification_id: 'n1',
+            delivery_id: 'd1',
+            notti: true,
+          },
         },
       },
     ]);
@@ -239,7 +244,7 @@ describe('push', () => {
     expect(h.shown).toEqual([
       {
         title: 'site.example',
-        options: { body: 'You have a new notification' },
+        options: { body: 'You have a new notification', data: { notti: true } },
       },
     ]);
     // Nothing identifies the delivery, so nothing is reported.
@@ -253,7 +258,7 @@ describe('push', () => {
       'push',
       pushWith({
         body: 'Only a body',
-        data: { notification_id: 'n1', delivery_id: 'd1' },
+        data: { notification_id: 'n1', delivery_id: 'd1', notti: true },
       })
     ).settled();
     expect(h.shown[0]).toMatchObject({
@@ -389,12 +394,35 @@ describe('notificationclick', () => {
     expect(h.openWindow).toHaveBeenCalledWith(`${ORIGIN}/`);
   });
 
-  it('opens the site root for a generic notification with no data', async () => {
+  it('opens the site root for the generic notification the worker shows for an unreadable push', async () => {
     const h = await harness();
-    await dispatch(h, 'notificationclick', click(undefined).event).settled();
+    await dispatch(
+      h,
+      'notificationclick',
+      click({ notti: true }).event
+    ).settled();
     expect(h.openWindow).toHaveBeenCalledWith(`${ORIGIN}/`);
     expect(h.fetches).toHaveLength(0);
   });
+
+  it.each([
+    ['no data', undefined],
+    ['a click target only', { url: '/offers' }],
+    ['unrelated data', { orderId: 42 }],
+    ['one id only', { notification_id: 'n1' }],
+  ])(
+    'leaves a notification the site showed itself alone: %s',
+    async (_name, notificationData) => {
+      const h = await harness();
+      const { event, close } = click(notificationData);
+      const { waits } = dispatch(h, 'notificationclick', event);
+      expect(close).not.toHaveBeenCalled();
+      expect(waits).toHaveLength(0);
+      expect(h.matchAll).not.toHaveBeenCalled();
+      expect(h.openWindow).not.toHaveBeenCalled();
+      expect(h.fetches).toHaveLength(0);
+    }
+  );
 
   it('opens a cross-origin URL without ever focusing an existing client', async () => {
     const focus = vi.fn(async () => undefined);
@@ -432,15 +460,15 @@ describe('notificationclick', () => {
     expect(h.fetches.map((f) => JSON.parse(f.raw).type)).toEqual(['clicked']);
   });
 
-  it('reports nothing when the notification carries no delivery ids', async () => {
+  it('opens a Notti notification that has no delivery ids but carries the marker, reporting nothing', async () => {
     const h = await harness();
     await dispatch(
       h,
       'notificationclick',
-      click({ url: '/offers' }).event
+      click({ notti: true, url: '/offers' }).event
     ).settled();
     expect(h.fetches).toHaveLength(0);
-    expect(h.openWindow).toHaveBeenCalled();
+    expect(h.openWindow).toHaveBeenCalledWith(`${ORIGIN}/offers`);
   });
 
   it('has no handler for a dismiss, so nothing is reported', async () => {
