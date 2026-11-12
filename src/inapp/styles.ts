@@ -30,6 +30,7 @@ export const STYLESHEET = `
   --ni-align: left;
   position: fixed;
   inset: 0;
+  z-index: 2147483647;
   pointer-events: none;
   font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   color: var(--ni-fg);

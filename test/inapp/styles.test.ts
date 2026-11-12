@@ -47,6 +47,10 @@ describe('STYLESHEET', () => {
     expect(STYLESHEET).not.toMatch(/url\(|@import|@font-face/);
   });
 
+  it('sits above the host page with the highest z-index', () => {
+    expect(STYLESHEET).toContain('z-index: 2147483647');
+  });
+
   it('respects the safe areas', () => {
     expect(STYLESHEET).toContain('env(safe-area-inset-top');
     expect(STYLESHEET).toContain('env(safe-area-inset-bottom');
