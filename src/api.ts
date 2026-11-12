@@ -14,13 +14,22 @@ export interface ApiConfig {
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string | undefined;
+  /** Seconds from a `Retry-After` header; undefined when absent or not a number of seconds. */
+  readonly retryAfter: number | undefined;
 
-  constructor(status: number, code?: string) {
+  constructor(status: number, code?: string, retryAfter?: number) {
     super(`Notti API answered ${status}${code ? ` ${code}` : ''}`);
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
+    this.retryAfter = retryAfter;
   }
+}
+
+function retryAfterSeconds(res: Response): number | undefined {
+  const raw = res.headers.get('Retry-After')?.trim();
+  if (!raw || !/^\d+$/.test(raw)) return undefined;
+  return Number(raw);
 }
 
 /**
@@ -59,7 +68,8 @@ export async function request(
   method: 'GET' | 'POST' | 'PATCH',
   path: string,
   body?: unknown,
-  timeoutMs: number = REQUEST_TIMEOUT_MS
+  timeoutMs: number = REQUEST_TIMEOUT_MS,
+  keepalive = false
 ): Promise<unknown> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -69,13 +79,14 @@ export async function request(
       Accept: 'application/json',
     };
     const init: RequestInit = { method, headers, signal: controller.signal };
+    if (keepalive) init.keepalive = true;
     if (body !== undefined) {
       headers['Content-Type'] = 'application/json';
       init.body = JSON.stringify(body);
     }
     const res = await fetcher(`${config.host}${path}`, init);
     if (!res.ok) {
-      throw new ApiError(res.status, await errorCode(res));
+      throw new ApiError(res.status, await errorCode(res), retryAfterSeconds(res));
     }
     const text = await res.text();
     return text ? (JSON.parse(text) as unknown) : undefined;
