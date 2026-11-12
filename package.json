@@ -1,7 +1,6 @@
 {
   "name": "notti-web-sdk",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "description": "Official Web SDK for Notti push notifications (Web Push + VAPID)",
   "type": "module",
   "sideEffects": false,
@@ -41,6 +40,18 @@
   ],
   "author": "Zeep Tecnologia <opensource@zeeplabs.com.br> (https://github.com/zeeplabs)",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zeeplabs/zeep-notti-web.git"
+  },
+  "bugs": {
+    "url": "https://github.com/zeeplabs/zeep-notti-web/issues"
+  },
+  "homepage": "https://github.com/zeeplabs/zeep-notti-web#readme",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
   "engines": {
     "node": ">=20"
   },
