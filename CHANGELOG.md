@@ -2,7 +2,7 @@
 
 ## 0.1.2 (2026-11-12)
 
-- A returning visitor now stays an active browser in Notti. A registered browser makes no request when the page loads, so Notti never heard from it again after the registration and, after 30 days, dropped it from the monthly active users (and ranked it last when an App is over its plan limit) even if the visitor kept coming. At `init`, a browser that Notti has not heard from for a day sends one small request in the background (its permission status). It never delays or fails `init`, and a failure is tried again at the next `init`.
+- A returning visitor now stays an active browser in Notti. A registered browser makes no request that tells Notti it is still active, so after the registration Notti never heard from it again and, after 30 days, dropped it from the monthly active users (and ranked it last when an App is over its plan limit) even if the visitor kept coming. At `init`, a browser that Notti has not heard from for a day sends one small request in the background (its permission status), about once a day: tabs open at the same time send it once between them, and an answer that a retry cannot change (a deleted device gets a 403) is not repeated until the next day. It never delays or fails `init`, and a failure that could succeed later (network, 5xx, 408, 429) is tried again at the next `init`.
 
 ## 0.1.1 (2026-11-12)
 

@@ -59,7 +59,7 @@ retried at the next `init`.
 
 ### Behaviour worth knowing
 
-- Notti counts a browser as active (monthly active users, and which devices stay inside an App's plan limit) from the last time it heard from it. At `init`, a registered browser that Notti has not heard from for a day sends one small request (its permission status) in the background, so a returning visitor stays active. It never delays or fails `init`, and a failure is tried again at the next one.
+- Notti counts a browser as active (monthly active users, and which devices stay inside an App's plan limit) from the last time it heard from it. At `init`, a registered browser that Notti has not heard from for a day sends one small request (its permission status) in the background, about once a day, so a returning visitor stays active. Tabs open at the same time send it once between them. It never delays or fails `init`; a failure that could succeed later is tried again at the next one, and an answer a retry cannot change (a deleted device gets a 403) waits until the next day.
 - The service worker always shows a notification, even for a payload it cannot read, because a browser
   may revoke permission from a site that receives a push and shows nothing.
 - It reports `received`, `clicked` and `opened` to Notti. Dismissing a notification reports nothing.
