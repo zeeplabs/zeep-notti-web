@@ -1,6 +1,6 @@
 import { ApiError } from './api';
 import { base64UrlToBytes, bytesEqual } from './base64';
-import { ensureRegistered, readSubscription } from './register';
+import { ensureRegistered, readSubscription, reportSeen } from './register';
 import { ensureFreshWorker } from './worker-version';
 import { getState, type Runtime, type SdkState } from './runtime';
 import {
@@ -232,7 +232,14 @@ export async function syncSubscription(
       stored?.appId === state.config.appId ||
       optIn?.appId === state.config.appId;
     if (!forThisApp) return;
-    await subscribeAndRegister(state, runtime);
+    const result = await subscribeAndRegister(state, runtime);
+    if (!result.registered) return;
+    // Not awaited: a sign of life must never hold init back or make it fail.
+    // Only init does this; the worker re-registers without it.
+    const device = await runtime.store.get<StoredDevice>(DEVICE_KEY);
+    if (device && device.appId === state.config.appId) {
+      void reportSeen(runtime, state.config, device).catch(() => undefined);
+    }
   } catch {
     // init must never fail because of a sync problem.
   }

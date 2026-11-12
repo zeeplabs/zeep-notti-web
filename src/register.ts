@@ -1,5 +1,5 @@
 import { createDevice, patchDevice, sdkFields } from './devices';
-import type { Runtime, SdkState } from './runtime';
+import { nowOf, type Runtime, type SdkState } from './runtime';
 import {
   flushProfile,
   markRegistrationCarried,
@@ -77,6 +77,8 @@ export async function ensureRegistered(
     auth: sub.auth,
     publicKey: state.publicKey,
     sdkSynced: false,
+    // The POST just made the server see this browser.
+    seenAt: nowOf(runtime),
   };
   await runtime.store.set(DEVICE_KEY, record);
   await markRegistrationCarried(runtime, extra);
@@ -105,8 +107,45 @@ async function reportSdkFields(
         ),
       runtime.sleep
     );
-    await runtime.store.set(DEVICE_KEY, { ...device, sdkSynced: true });
+    // The PATCH is also a sign of life.
+    await runtime.store.set(DEVICE_KEY, {
+      ...device,
+      sdkSynced: true,
+      seenAt: nowOf(runtime),
+    });
   } catch {
     // Left unsynced; the next init repeats it.
+  }
+}
+
+/**
+ * The server counts a browser as active (MAU, and the order in which an App
+ * over its limit is cut) from the last time it heard from it. A returning
+ * visitor makes no other request, so without this the browser would drop out
+ * after 30 days of perfectly good visits. One light PATCH a day is enough; it
+ * carries nothing but the token that proves ownership and the permission, and a
+ * failure is simply tried again at the next init.
+ */
+export const HEARTBEAT_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+export async function reportSeen(
+  runtime: Runtime,
+  config: ApiConfig,
+  device: StoredDevice
+): Promise<void> {
+  const now = nowOf(runtime);
+  if (device.seenAt !== undefined) {
+    // A stored time in the future (the clock went back) counts as stale.
+    const age = now - device.seenAt;
+    if (age >= 0 && age < HEARTBEAT_INTERVAL_MS) return;
+  }
+  await patchDevice(runtime.fetch, config, device.id, device.endpoint, {
+    permission_status: 'granted',
+  });
+  // Read again: another write (the sdk flag) may have changed the record while
+  // the PATCH was in flight, and this one must not put it back.
+  const latest = await runtime.store.get<StoredDevice>(DEVICE_KEY);
+  if (latest?.id === device.id) {
+    await runtime.store.set(DEVICE_KEY, { ...latest, seenAt: now });
   }
 }
