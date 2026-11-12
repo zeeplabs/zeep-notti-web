@@ -11,11 +11,14 @@ export interface Runtime {
   sleep: Sleep;
 }
 
+// One store, so each Notti.* call does not open its own IndexedDB connection.
+let sharedStore: Store | undefined;
+
 export function defaultRuntime(): Runtime {
   return {
     env: browserEnv(),
     fetch: (input, init) => globalThis.fetch(input, init),
-    store: idbStore(),
+    store: (sharedStore ??= idbStore()),
     sleep: realSleep,
   };
 }

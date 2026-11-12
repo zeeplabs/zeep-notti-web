@@ -27,14 +27,27 @@ export function memoryStore(): Store {
   };
 }
 
-function openDb(idb: IDBFactory): Promise<IDBDatabase> {
+/**
+ * Opens the database. `onClosed` runs when the connection is closed because
+ * another context (a newer SDK, a worker) asked to upgrade the database: this
+ * connection must not hold that upgrade back, and the next call opens again.
+ */
+function openDb(idb: IDBFactory, onClosed: () => void): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = idb.open(DB_NAME, 1);
     req.onupgradeneeded = () => {
       req.result.createObjectStore(STORE_NAME);
     };
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => {
+      const db = req.result;
+      db.onversionchange = () => {
+        db.close();
+        onClosed();
+      };
+      resolve(db);
+    };
     req.onerror = () => reject(req.error ?? new Error('indexeddb open failed'));
+    req.onblocked = () => reject(new Error('indexeddb open blocked'));
   });
 }
 
@@ -59,7 +72,14 @@ export function idbStore(
 ): Store {
   if (!idb) return memoryStore();
   let db: Promise<IDBDatabase> | null = null;
-  const conn = () => (db ??= openDb(idb));
+  const conn = () =>
+    (db ??= openDb(idb, () => {
+      db = null;
+    }).catch((err: unknown) => {
+      // A failed open is tried again by the next call.
+      db = null;
+      throw err;
+    }));
   return {
     get: async <T>(key: string) =>
       run<T | undefined>(await conn(), 'readonly', (s) => s.get(key)),
