@@ -1,6 +1,6 @@
 {
   "name": "notti-web-sdk",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Official Web SDK for Notti push notifications (Web Push + VAPID)",
   "type": "module",
   "sideEffects": [

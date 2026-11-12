@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0 (unreleased)
+
+- In-App messages on the web. A browser with a Web Push subscription fetches the messages targeted at Web once per page load and shows the first one that starts with the session, as a Shadow DOM overlay with the four layouts (`center`, `top`, `bottom`, `full`), the style tokens, a close control and the auto-dismiss timer. It reports `impression`, `click` and `dismiss` like the mobile SDKs. A visitor with no registered browser makes no request and sees nothing; `init` never waits for it and its result does not change.
+- `Notti.InAppMessages.addClickListener(handler)` (returns `{ remove() }`) receives `{ messageId, buttonId, action }` after a button or the image was pressed. The SDK opens nothing itself.
+- `Notti.trackEvent(name)` shows the oldest held message triggered by that event name, when no message is visible. Names tracked before `init` finishes are remembered (up to 32).
+- A message whose image cannot load is not shown and reports nothing. `push_permission` buttons are not shown on the web.
+- The Notti server must be a version that sends CORS headers on the In-App routes (this release's server). Update the server first, then the SDK.
+
 ## 0.1.2 (2026-11-12)
 
 - A returning visitor now stays an active browser in Notti. A registered browser makes no request that tells Notti it is still active, so after the registration Notti never heard from it again and, after 30 days, dropped it from the monthly active users (and ranked it last when an App is over its plan limit) even if the visitor kept coming. At `init`, a browser that Notti has not heard from for a day sends one small request in the background (its permission status), about once a day: tabs open at the same time send it once between them, and an answer that a retry cannot change (a deleted device gets a 403) is not repeated until the next day. It never delays or fails `init`, and a failure that could succeed later (network, 5xx, 408, 429) is tried again at the next `init`.

@@ -1,6 +1,6 @@
 import { ApiError, getWebPushConfig, normalizeHost } from './api';
 import { detectSupport, type SupportResult } from './capabilities';
-import { defaultRuntime, setState, type Runtime } from './runtime';
+import { defaultRuntime, setState, type Runtime, type SdkState } from './runtime';
 import { CONFIG_KEY, type StoredConfig } from './store';
 import { syncSubscription } from './subscribe';
 
@@ -69,5 +69,18 @@ export async function init(
   }
 
   await syncSubscription(state, runtime);
+  startInApp(state, runtime);
   return { supported: true };
+}
+
+/**
+ * Not awaited and never throwing: In-App is a bonus on top of Web Push, so a
+ * failure in it must not change what `init` reports or when it returns.
+ */
+function startInApp(state: SdkState, runtime: Runtime): void {
+  try {
+    runtime.inApp?.start(state, runtime).catch(() => undefined);
+  } catch {
+    // A synchronous failure of a custom session ends up here.
+  }
 }

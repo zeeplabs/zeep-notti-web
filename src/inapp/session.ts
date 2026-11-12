@@ -1,5 +1,5 @@
 import { ApiError } from '../api';
-import { nowOf, type Runtime, type SdkState } from '../runtime';
+import type { Runtime, SdkState } from '../runtime';
 import { DEVICE_KEY, type StoredDevice } from '../store';
 import {
   fetchEligible,
@@ -91,7 +91,7 @@ export function createInAppSession(deps: SessionDeps): InAppSession {
     const event: InAppEvent = {
       ...partial,
       eventId: makeEventId(),
-      occurredAt: nowOf(runtime),
+      occurredAt: (runtime.now ?? Date.now)(),
     };
     enqueue(() => reportInAppEvent(runtime, state.config, device, message.id, event));
   }

@@ -57,6 +57,35 @@ npm install notti-web-sdk
 Calls made before the browser is registered are kept and sent at registration; a call that fails is
 retried at the next `init`.
 
+### In-App messages
+
+A browser that has accepted push also receives the In-App messages an author targeted at **Web**.
+There is nothing to turn on: `init` fetches them once per page load and shows the first message that
+starts with the session. A visitor who never accepted push (no registered browser) gets no request and
+no message.
+
+```js
+// The SDK never opens a link itself; you decide what a button does.
+const subscription = Notti.InAppMessages.addClickListener(({ messageId, buttonId, action }) => {
+  if (action?.type === 'url') window.open(action.value, '_blank', 'noopener');
+  // action.type === 'deeplink': route it inside your app
+});
+subscription.remove(); // when you no longer want it
+
+// Messages triggered by an event show when you report that exact name (matched in the browser,
+// never sent to Notti). Names tracked before `init` finishes are remembered (up to 32).
+Notti.trackEvent('checkout_done');
+```
+
+- The overlay lives in a Shadow DOM, so your CSS does not reach it and it does not leak any. It needs
+  `img-src` for the host of the message image if your page sets a Content Security Policy; an image
+  that cannot load means the message is not shown.
+- `center` and `full` are modal dialogs (focus stays inside, Esc closes, focus returns to what had it);
+  `top` and `bottom` are non-modal regions. The rest of the page is not made `inert`.
+- Every message has a close control. `push_permission` buttons are not shown on the web.
+- Messages are not kept between page loads, and events are not queued across loads: an event that
+  could not be sent when the page closed is dropped.
+
 ### Behaviour worth knowing
 
 - Notti counts a browser as active (monthly active users, and which devices stay inside an App's plan limit) from the last time it heard from it. At `init`, a registered browser that Notti has not heard from for a day sends one small request (its permission status) in the background, about once a day, so a returning visitor stays active. Tabs open at the same time send it once between them. It never delays or fails `init`; a failure that could succeed later is tried again at the next one, and an answer a retry cannot change (a deleted device gets a 403) waits until the next day.
