@@ -1,9 +1,15 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { init } from '../src/init';
 import { identify, logout, removeTags, setTags } from '../src/profile';
 import { setState } from '../src/runtime';
 import { requestPermission } from '../src/subscribe';
-import { DEVICE_KEY, PROFILE_KEY, memoryStore, type Store } from '../src/store';
+import {
+  DEVICE_KEY,
+  PROFILE_KEY,
+  memoryStore,
+  type Store,
+  type StoredProfile,
+} from '../src/store';
 import {
   PUBLIC_KEY,
   fakeBrowser,
@@ -35,13 +41,15 @@ function server(overrides: Partial<Record<string, () => Response>> = {}) {
   };
 }
 
-function build(respond = server(), store: Store = memoryStore()) {
+type Respond = (req: RecordedRequest) => Response | Promise<Response>;
+
+function build(respond: Respond = server(), store: Store = memoryStore()) {
   const browser = fakeBrowser({ created: fakeSubscription(ENDPOINT) });
   return { browser, ...fakeRuntime(respond, browser.env, store) };
 }
 
 /** A browser that already opted in; later requests are the ones asserted. */
-async function registered(respond = server()) {
+async function registered(respond: Respond = server()) {
   const t = build(respond);
   await init(opts, t.runtime);
   await requestPermission(t.runtime);
@@ -321,5 +329,125 @@ describe('robustness', () => {
     await setTags(t.runtime, { a: 'b' });
     await logout(t.runtime);
     expect(t.requests.filter((r) => r.method !== 'GET')).toHaveLength(0);
+  });
+});
+
+describe('a profile change made while the registration POST is in flight', () => {
+  /** A server whose device POST waits until `release` is called. */
+  function slowPost() {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const base = server();
+    const respond = async (req: RecordedRequest): Promise<Response> => {
+      if (req.method === 'POST' && req.url === DEVICES) await gate;
+      return base(req);
+    };
+    return { respond, release };
+  }
+
+  /** Waits until the POST has been sent, so the change lands while it is in flight. */
+  async function postSent(requests: RecordedRequest[]) {
+    await vi.waitFor(
+      () => expect(requests.some((r) => r.method === 'POST')).toBe(true),
+      {
+        interval: 1,
+      }
+    );
+  }
+
+  it('still sends a logout that came after the POST read the profile', async () => {
+    const { respond, release } = slowPost();
+    const t = build(respond);
+    await init(opts, t.runtime);
+    await identify(t.runtime, 'user-A');
+
+    const registering = requestPermission(t.runtime);
+    await postSent(t.requests);
+    expect(t.requests.find((r) => r.method === 'POST')?.body).toMatchObject({
+      external_user_id: 'user-A',
+    });
+    await logout(t.runtime);
+    release();
+    await registering;
+
+    const last = patches(t.requests).at(-1);
+    expect(last?.body).toMatchObject({ external_user_id: null });
+    expect((await t.store.get<StoredProfile>(PROFILE_KEY))?.pending).toEqual(
+      []
+    );
+  });
+
+  it('still sends tags changed after the POST read the profile', async () => {
+    const { respond, release } = slowPost();
+    const t = build(respond);
+    await init(opts, t.runtime);
+    await setTags(t.runtime, { plan: 'pro' });
+
+    const registering = requestPermission(t.runtime);
+    await postSent(t.requests);
+    await setTags(t.runtime, { plan: 'basic' });
+    release();
+    await registering;
+
+    const last = patches(t.requests).at(-1);
+    expect(last?.body).toMatchObject({ tags: { plan: 'basic' } });
+    expect((await t.store.get<StoredProfile>(PROFILE_KEY))?.pending).toEqual(
+      []
+    );
+  });
+
+  it('clears the pending fields when nothing changed meanwhile', async () => {
+    const t = build();
+    await init(opts, t.runtime);
+    await identify(t.runtime, 'user-A');
+    await setTags(t.runtime, { plan: 'pro' });
+    await requestPermission(t.runtime);
+
+    expect((await t.store.get<StoredProfile>(PROFILE_KEY))?.pending).toEqual(
+      []
+    );
+    // The POST carried both, so only the sdk PATCH follows.
+    expect(patches(t.requests)).toHaveLength(1);
+  });
+});
+
+describe('concurrent profile calls', () => {
+  it('sends one PATCH at a time and ends with the last value', async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    let releaseFirst: () => void = () => undefined;
+    const firstGate = new Promise<void>((resolve) => (releaseFirst = resolve));
+    let patchCount = 0;
+    const base = server();
+    const respond = async (req: RecordedRequest): Promise<Response> => {
+      if (
+        req.method === 'PATCH' &&
+        'external_user_id' in (req.body as object)
+      ) {
+        inFlight++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        if (++patchCount === 1) await firstGate;
+        inFlight--;
+      }
+      return base(req);
+    };
+    const t = await registered(respond);
+
+    const first = logout(t.runtime);
+    const second = identify(t.runtime, 'user-B');
+    // Let both calls reach the server queue before the first PATCH finishes.
+    await vi.waitFor(() => expect(patchCount).toBe(1), { interval: 1 });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    releaseFirst();
+    await Promise.all([first, second]);
+
+    expect(maxInFlight).toBe(1);
+    const sent = patches(t.requests).filter(
+      (r) => 'external_user_id' in (r.body as object)
+    );
+    expect(sent.at(-1)?.body).toMatchObject({ external_user_id: 'user-B' });
+    expect((await t.store.get<StoredProfile>(PROFILE_KEY))?.pending).toEqual(
+      []
+    );
   });
 });
