@@ -94,6 +94,10 @@ pnpm example    # sample page on http://localhost:5173
 
 Package manager is pnpm; Node version is in `.nvmrc`.
 
+## Contributing and security
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md). Report vulnerabilities privately, as described in [SECURITY.md](SECURITY.md).
+
 ## License
 
 MIT
