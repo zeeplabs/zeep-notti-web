@@ -115,6 +115,11 @@ export interface StoredDevice {
    * by 0.1.0 has no flag and counts as acknowledged.
    */
   sdkSynced?: boolean;
+  /**
+   * When the server last saw this browser (epoch ms): the registration, the
+   * sdk PATCH or a heartbeat. A record written by 0.1.0 or 0.1.1 has none.
+   */
+  seenAt?: number;
 }
 
 /** Set when the visitor opted in through `requestPermission`, whatever came next. */

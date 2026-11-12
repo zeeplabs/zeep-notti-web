@@ -9,7 +9,12 @@ export interface Runtime {
   fetch: Fetcher;
   store: Store;
   sleep: Sleep;
+  /** Milliseconds since the epoch; defaults to `Date.now`. */
+  now?: () => number;
 }
+
+export const nowOf = (runtime: Runtime): number =>
+  (runtime.now ?? Date.now)();
 
 // One store, so each Notti.* call does not open its own IndexedDB connection.
 let sharedStore: Store | undefined;
