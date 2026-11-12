@@ -5,7 +5,7 @@ import {
   markRegistrationCarried,
   profileForRegistration,
 } from './profile';
-import { withRetry } from './retry';
+import { isRetryable, withRetry } from './retry';
 import { DEVICE_KEY, type StoredDevice } from './store';
 import type { ApiConfig } from './api';
 
@@ -121,31 +121,60 @@ async function reportSdkFields(
 /**
  * The server counts a browser as active (MAU, and the order in which an App
  * over its limit is cut) from the last time it heard from it. A returning
- * visitor makes no other request, so without this the browser would drop out
- * after 30 days of perfectly good visits. One light PATCH a day is enough; it
- * carries nothing but the token that proves ownership and the permission, and a
- * failure is simply tried again at the next init.
+ * visitor makes no other request that says so, so without this the browser
+ * would drop out after 30 days of perfectly good visits. About one light PATCH
+ * a day is enough; it carries nothing but the token that proves ownership and
+ * the permission.
+ *
+ * The day is claimed (`seenAt` written) before the request, and given back only
+ * when the failure is worth repeating (network, 5xx, 408, 429). A terminal
+ * answer, such as the 403 a deleted device gets, keeps the claim, so it is not
+ * retried at every page load; the record stays, because forgetting it would
+ * make the browser register again and bring back a device an operator deleted
+ * on purpose. Tabs of one origin take a Web Lock, so they send once between
+ * them.
  */
 export const HEARTBEAT_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const HEARTBEAT_LOCK = 'notti-heartbeat';
 
 export async function reportSeen(
   runtime: Runtime,
   config: ApiConfig,
   device: StoredDevice
 ): Promise<void> {
+  const locks = runtime.locks;
+  if (!locks) return heartbeat(runtime, config, device);
+  await locks.request(HEARTBEAT_LOCK, { ifAvailable: true }, (lock) =>
+    lock ? heartbeat(runtime, config, device) : undefined
+  );
+}
+
+async function heartbeat(
+  runtime: Runtime,
+  config: ApiConfig,
+  device: StoredDevice
+): Promise<void> {
   const now = nowOf(runtime);
-  if (device.seenAt !== undefined) {
+  // The record as it is now, not as init read it: another tab or another step
+  // may have written it since.
+  const latest = await runtime.store.get<StoredDevice>(DEVICE_KEY);
+  if (!latest || latest.id !== device.id) return;
+  if (latest.seenAt !== undefined) {
     // A stored time in the future (the clock went back) counts as stale.
-    const age = now - device.seenAt;
+    const age = now - latest.seenAt;
     if (age >= 0 && age < HEARTBEAT_INTERVAL_MS) return;
   }
-  await patchDevice(runtime.fetch, config, device.id, device.endpoint, {
-    permission_status: 'granted',
-  });
-  // Read again: another write (the sdk flag) may have changed the record while
-  // the PATCH was in flight, and this one must not put it back.
-  const latest = await runtime.store.get<StoredDevice>(DEVICE_KEY);
-  if (latest?.id === device.id) {
-    await runtime.store.set(DEVICE_KEY, { ...latest, seenAt: now });
+  await runtime.store.set(DEVICE_KEY, { ...latest, seenAt: now });
+  try {
+    await patchDevice(runtime.fetch, config, device.id, latest.endpoint, {
+      permission_status: 'granted',
+    });
+  } catch (err) {
+    if (!isRetryable(err)) return;
+    // Give the day back, unless something else wrote the record meanwhile.
+    const current = await runtime.store.get<StoredDevice>(DEVICE_KEY);
+    if (current?.id === device.id && current.seenAt === now) {
+      await runtime.store.set(DEVICE_KEY, { ...current, seenAt: latest.seenAt });
+    }
   }
 }
