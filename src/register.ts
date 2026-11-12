@@ -7,6 +7,7 @@ import {
 } from './profile';
 import { withRetry } from './retry';
 import { DEVICE_KEY, type StoredDevice } from './store';
+import type { ApiConfig } from './api';
 
 export interface ReadSubscription {
   endpoint: string;
@@ -31,9 +32,10 @@ export function readSubscription(
  * this App matches it exactly (same endpoint, keys and VAPID key), so a page
  * reload makes no request. A changed endpoint or key re-registers.
  *
- * Throws when the Device cannot be created; a failed follow-up PATCH does not
- * fail the registration, it only leaves the record unsaved so the next init
- * repeats it.
+ * Throws when the Device cannot be created. The Device is stored as soon as
+ * the server has it, so the worker can report events at once; a failed
+ * follow-up PATCH does not fail the registration, it only leaves the record
+ * marked unsynced so the next init repeats that PATCH.
  */
 export async function ensureRegistered(
   state: SdkState,
@@ -49,8 +51,11 @@ export async function ensureRegistered(
     stored.auth === sub.auth &&
     stored.publicKey === state.publicKey
   ) {
-    // Nothing to register, but a profile change that failed earlier is still
-    // owed to the server.
+    // Nothing to register, but an sdk PATCH or a profile change that failed
+    // earlier is still owed to the server.
+    if (stored.sdkSynced === false) {
+      await reportSdkFields(runtime, state.config, stored);
+    }
     await flushProfile(runtime, state.config, stored);
     return stored.id;
   }
@@ -61,18 +66,9 @@ export async function ensureRegistered(
     () => createDevice(runtime.fetch, state.config, sub.endpoint, sub, extra),
     runtime.sleep
   );
-  await markRegistrationCarried(runtime, extra);
 
-  try {
-    await withRetry(
-      () =>
-        patchDevice(runtime.fetch, state.config, id, sub.endpoint, sdkFields()),
-      runtime.sleep
-    );
-  } catch {
-    return id;
-  }
-
+  // Stored before anything else is sent: from here on the worker can report
+  // events and identify/setTags reach the server, whatever happens next.
   const record: StoredDevice = {
     id,
     appId: state.config.appId,
@@ -80,10 +76,37 @@ export async function ensureRegistered(
     p256dh: sub.p256dh,
     auth: sub.auth,
     publicKey: state.publicKey,
+    sdkSynced: false,
   };
   await runtime.store.set(DEVICE_KEY, record);
+  await markRegistrationCarried(runtime, extra);
+  await reportSdkFields(runtime, state.config, record);
   // A logout that is still pending must reach the server even though the POST
   // omitted external_user_id (an omitted id keeps the stored one).
   await flushProfile(runtime, state.config, record);
   return id;
+}
+
+/** Sends sdk_name and sdk_version; marks the stored Device synced on success. */
+async function reportSdkFields(
+  runtime: Runtime,
+  config: ApiConfig,
+  device: StoredDevice
+): Promise<void> {
+  try {
+    await withRetry(
+      () =>
+        patchDevice(
+          runtime.fetch,
+          config,
+          device.id,
+          device.endpoint,
+          sdkFields()
+        ),
+      runtime.sleep
+    );
+    await runtime.store.set(DEVICE_KEY, { ...device, sdkSynced: true });
+  } catch {
+    // Left unsynced; the next init repeats it.
+  }
 }

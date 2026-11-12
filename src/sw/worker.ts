@@ -98,6 +98,21 @@ interface NotificationData {
   url?: string;
   notification_id?: string;
   delivery_id?: string;
+  /** Marks a notification this worker showed, as opposed to the host's own. */
+  notti?: true;
+}
+
+/**
+ * Whether a notification was shown by this worker. A site that loads this file
+ * into its own service worker shows notifications of its own too, and a click
+ * on those is not ours to close, open or report. The marker covers every
+ * notification the worker shows; the pair of ids covers one a worker of 0.1.0
+ * showed before it was replaced.
+ */
+function isNottiNotification(data: NotificationData | undefined): boolean {
+  return (
+    data?.notti === true || Boolean(data?.notification_id && data.delivery_id)
+  );
 }
 
 const isString = (v: unknown): v is string => typeof v === 'string';
@@ -250,6 +265,7 @@ export function installWorker(scope: WorkerScope, deps: WorkerDeps): void {
           ...(parsed.image ? { image: parsed.image } : {}),
           ...(parsed.tag ? { tag: parsed.tag } : {}),
           data: {
+            notti: true,
             ...(parsed.data['url'] ? { url: parsed.data['url'] } : {}),
             ...(parsed.data['notification_id']
               ? { notification_id: parsed.data['notification_id'] }
@@ -261,6 +277,7 @@ export function installWorker(scope: WorkerScope, deps: WorkerDeps): void {
         })
       : scope.registration.showNotification(scope.location.hostname, {
           body: 'You have a new notification',
+          data: { notti: true } satisfies NotificationData,
         });
 
     // `received` is reported only for a notification that was actually shown,
@@ -279,9 +296,11 @@ export function installWorker(scope: WorkerScope, deps: WorkerDeps): void {
   });
 
   on<ClickEventLike>(scope, 'notificationclick', (event) => {
-    event.notification.close();
     const data = (event.notification.data ?? undefined) as
       NotificationData | undefined;
+    // Not ours: leave it to the host's own handlers.
+    if (!isNottiNotification(data)) return;
+    event.notification.close();
     const target = resolveClickTarget(data?.url, scope.location.origin);
 
     const open = async (): Promise<boolean> => {

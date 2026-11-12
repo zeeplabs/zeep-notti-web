@@ -3,7 +3,12 @@ import { base64UrlToBytes, bytesEqual } from './base64';
 import { ensureRegistered, readSubscription } from './register';
 import { ensureFreshWorker } from './worker-version';
 import { getState, type Runtime, type SdkState } from './runtime';
-import { DEVICE_KEY, type StoredDevice } from './store';
+import {
+  DEVICE_KEY,
+  OPT_IN_KEY,
+  type StoredDevice,
+  type StoredOptIn,
+} from './store';
 
 export type PermissionState = 'granted' | 'denied' | 'default';
 
@@ -195,6 +200,14 @@ export async function requestPermission(
     }
   }
   if (permission !== 'granted') return { permission, registered: false };
+  // Remembered before the registration, so a failed one is repeated at the
+  // next init: the visitor did opt in, even if the server was unreachable.
+  try {
+    const optIn: StoredOptIn = { appId: state.config.appId };
+    await runtime.store.set(OPT_IN_KEY, optIn);
+  } catch {
+    // Storage can be unavailable; the registration below still runs.
+  }
   return subscribeAndRegister(state, runtime);
 }
 
@@ -202,7 +215,8 @@ export async function requestPermission(
  * Called by init. When the visitor already opted in through this SDK and
  * permission is still granted, re-checks the browser subscription and
  * re-registers if the endpoint or the App's key changed (covers a VAPID
- * rotation, and browsers that never fire `pushsubscriptionchange`). Does
+ * rotation, and browsers that never fire `pushsubscriptionchange`), and
+ * repeats a registration that failed earlier. Does
  * nothing otherwise: it never prompts and never subscribes a visitor who did
  * not opt in. Never throws.
  */
@@ -213,7 +227,11 @@ export async function syncSubscription(
   try {
     if (notificationApi(runtime)?.permission !== 'granted') return;
     const stored = await runtime.store.get<StoredDevice>(DEVICE_KEY);
-    if (!stored || stored.appId !== state.config.appId) return;
+    const optIn = await runtime.store.get<StoredOptIn>(OPT_IN_KEY);
+    const forThisApp =
+      stored?.appId === state.config.appId ||
+      optIn?.appId === state.config.appId;
+    if (!forThisApp) return;
     await subscribeAndRegister(state, runtime);
   } catch {
     // init must never fail because of a sync problem.

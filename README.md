@@ -62,8 +62,15 @@ retried at the next `init`.
 - The service worker always shows a notification, even for a payload it cannot read, because a browser
   may revoke permission from a site that receives a push and shows nothing.
 - It reports `received`, `clicked` and `opened` to Notti. Dismissing a notification reports nothing.
-- The click target is `data.url` (a path on your origin or an `https` URL). An absent or non-http(s) URL
-  opens the site root. A URL on another origin is opened but never focuses an existing window.
+- The click target is `data.url` (a path on your origin or an `http(s)` URL). An absent or other-scheme
+  URL (`javascript:`, `data:`) opens the site root. A URL on another origin is opened but never focuses an existing window.
+- A registration that fails (the server was unreachable) is repeated at the next `init`, once the visitor
+  has opted in through `requestPermission`.
+- The worker handles clicks only on notifications it showed itself. If your site already has a service
+  worker, load Notti's file from it with `importScripts('/notti-sw.js')` and pass the path of **your**
+  worker as `serviceWorkerPath` to `Notti.init`, so the SDK registers that one and not `/notti-sw.js`.
+  A registration has one push subscription, so push from a single provider per scope. Notti's file also
+  takes over at once (`skipWaiting`, `clients.claim`) when it is installed.
 - When the browser replaces the subscription (or the App's VAPID key was rotated) the SDK registers the
   new one on the next `init`, and the worker does it on `pushsubscriptionchange`.
 - The Notti server must answer cross-origin requests from your site: web push config, device register,

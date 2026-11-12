@@ -32,6 +32,17 @@ function exclusive<T>(fn: () => Promise<T>): Promise<T> {
   return run;
 }
 
+// Flushes send the current state of the profile, so they must reach the server
+// in the order they were started: two in flight at once could be applied out of
+// order and leave the server with the older value. Kept apart from `exclusive`
+// so a slow request never holds up a change to the stored profile.
+let flushChain: Promise<unknown> = Promise.resolve();
+function serialFlush(fn: () => Promise<void>): Promise<void> {
+  const run = flushChain.then(fn, fn);
+  flushChain = run.catch(() => undefined);
+  return run;
+}
+
 function markPending(profile: StoredProfile, field: PendingField): void {
   if (!profile.pending.includes(field)) profile.pending.push(field);
 }
@@ -50,7 +61,15 @@ async function registeredDevice(
  * the same wire shape as the mobile SDKs. Failures leave the fields pending
  * for the next registration. Never throws.
  */
-export async function flushProfile(
+export function flushProfile(
+  runtime: Runtime,
+  config: ApiConfig,
+  device: StoredDevice
+): Promise<void> {
+  return serialFlush(() => flushNow(runtime, config, device));
+}
+
+async function flushNow(
   runtime: Runtime,
   config: ApiConfig,
   device: StoredDevice
@@ -98,7 +117,12 @@ export async function profileForRegistration(
   return out;
 }
 
-/** Called after a registration that carried the profile in its POST body. */
+/**
+ * Called after a registration that carried the profile in its POST body. A
+ * field stops being pending only if the profile still holds the value the
+ * POST carried: a change the host made while the POST was in flight is still
+ * owed to the server.
+ */
 export async function markRegistrationCarried(
   runtime: Runtime,
   carried: { external_user_id?: string; tags?: Record<string, TagValue> }
@@ -107,8 +131,16 @@ export async function markRegistrationCarried(
     const profile = await load(runtime);
     profile.pending = profile.pending.filter(
       (f) =>
-        !(f === 'external_user_id' && carried.external_user_id !== undefined) &&
-        !(f === 'tags' && carried.tags !== undefined)
+        !(
+          f === 'external_user_id' &&
+          carried.external_user_id !== undefined &&
+          profile.external_user_id === carried.external_user_id
+        ) &&
+        !(
+          f === 'tags' &&
+          carried.tags !== undefined &&
+          JSON.stringify(profile.tags) === JSON.stringify(carried.tags)
+        )
     );
     await runtime.store.set(PROFILE_KEY, profile);
   });

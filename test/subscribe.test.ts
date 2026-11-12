@@ -314,7 +314,7 @@ describe('registration', () => {
     expect((await requestPermission(runtime)).reason).toBe('not_enabled');
   });
 
-  it('keeps the registration when only the sdk PATCH fails, and repeats it next init', async () => {
+  it('keeps the Device when only the sdk PATCH fails, so the worker can already report', async () => {
     const respond = server({
       'PATCH /v1/apps/app_1/devices/dev_1': () => jsonResponse(500, {}),
     });
@@ -322,7 +322,104 @@ describe('registration', () => {
     await init(opts, first.runtime);
     const result = await requestPermission(first.runtime);
     expect(result).toMatchObject({ registered: true, deviceId: 'dev_1' });
+    expect(await first.store.get(DEVICE_KEY)).toMatchObject({
+      id: 'dev_1',
+      endpoint: ENDPOINT,
+      sdkSynced: false,
+    });
+  });
+});
+
+describe('a registration that failed is repeated at the next init', () => {
+  const reload = (first: ReturnType<typeof setup>, respond = server()) => {
+    setState(null);
+    return fakeRuntime(respond, first.browser.env, first.store);
+  };
+
+  it('registers on the next init when the POST failed', async () => {
+    const first = setup(
+      {},
+      server({ 'POST /v1/apps/app_1/devices': () => jsonResponse(503, {}) })
+    );
+    await init(opts, first.runtime);
+    const result = await requestPermission(first.runtime);
+    expect(result).toMatchObject({
+      registered: false,
+      reason: 'register_failed',
+    });
     expect(await first.store.get(DEVICE_KEY)).toBeUndefined();
+
+    const second = reload(first);
+    await init(opts, second.runtime);
+
+    const [post, patch] = writes(second.requests);
+    expect(post).toMatchObject({ method: 'POST', body: { token: ENDPOINT } });
+    expect(patch).toMatchObject({ method: 'PATCH' });
+    // The browser kept the subscription, so nothing is subscribed again.
+    expect(first.browser.subscribe).toHaveBeenCalledTimes(1);
+    expect(await first.store.get(DEVICE_KEY)).toMatchObject({
+      id: 'dev_1',
+      sdkSynced: true,
+    });
+  });
+
+  it('repeats only the sdk PATCH on the next init when the POST worked and the PATCH failed', async () => {
+    const first = setup(
+      {},
+      server({
+        'PATCH /v1/apps/app_1/devices/dev_1': () => jsonResponse(500, {}),
+      })
+    );
+    await init(opts, first.runtime);
+    await requestPermission(first.runtime);
+
+    const second = reload(first);
+    await init(opts, second.runtime);
+    const repeated = writes(second.requests);
+    expect(repeated).toHaveLength(1);
+    expect(repeated[0]).toMatchObject({
+      method: 'PATCH',
+      url: 'https://app.zeepnotti.app/v1/apps/app_1/devices/dev_1',
+      body: { sdk_name: 'web', permission_status: 'granted' },
+    });
+    expect(await first.store.get(DEVICE_KEY)).toMatchObject({
+      sdkSynced: true,
+    });
+
+    // Once acknowledged, a later reload makes no request at all.
+    const third = reload(first);
+    await init(opts, third.runtime);
+    expect(writes(third.requests)).toHaveLength(0);
+  });
+
+  it('never subscribes a visitor who did not opt in through the SDK', async () => {
+    // Permission was granted by the host page, not through requestPermission.
+    const first = setup({ permission: 'granted' });
+    await init(opts, first.runtime);
+    expect(writes(first.requests)).toHaveLength(0);
+    expect(first.browser.subscribe).not.toHaveBeenCalled();
+    expect(first.browser.register).not.toHaveBeenCalled();
+  });
+
+  it('does not retry for another App', async () => {
+    const first = setup(
+      {},
+      server({ 'POST /v1/apps/app_1/devices': () => jsonResponse(503, {}) })
+    );
+    await init(opts, first.runtime);
+    await requestPermission(first.runtime);
+
+    setState(null);
+    const other = fakeRuntime(
+      (req) =>
+        new URL(req.url).pathname === '/v1/apps/app_2/web-push/config'
+          ? jsonResponse(200, { public_key: PUBLIC_KEY })
+          : jsonResponse(404, { error: { code: 'not_found' } }),
+      first.browser.env,
+      first.store
+    );
+    await init({ appId: 'app_2', clientKey: 'ck_other' }, other.runtime);
+    expect(writes(other.requests)).toHaveLength(0);
   });
 });
 
