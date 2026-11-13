@@ -1,15 +1,75 @@
 import type { InAppStyle } from './types';
 
+const DARK_TEXT = '#1A1A1A';
+const LIGHT_TEXT = '#FFFFFF';
+const LIGHT_SURFACE = '#FFFFFF';
+const DARK_SURFACE = '#1F1F1F';
+
+function channel(hex: string, start: number): number {
+  const value = parseInt(hex.slice(start, start + 2), 16) / 255;
+  return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+}
+
+/** WCAG relative luminance of a `#RRGGBB` colour (the parser only lets those through). */
+function luminance(hex: string): number {
+  return 0.2126 * channel(hex, 1) + 0.7152 * channel(hex, 3) + 0.0722 * channel(hex, 5);
+}
+
+function contrast(a: string, b: string): number {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [number, number];
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+/** Whichever of the two reads better against `against`. */
+function readableOn(against: string, light: string, dark: string): string {
+  return contrast(light, against) >= contrast(dark, against) ? light : dark;
+}
+
 /**
- * Custom properties for the tokens the author set. An absent token adds
- * nothing, so the stylesheet default (and its dark variant) stays in force.
+ * Custom properties for the tokens the author set. A token the author left out
+ * keeps the stylesheet default (and its dark variant), except when its partner
+ * was set: the defaults follow the visitor's colour scheme, not the author's
+ * colour, so a lone background or text colour could meet a default that cannot be
+ * read against it (dark text on a dark panel). The missing half is then derived
+ * from the one that was set, by contrast, and the author's own tokens stay as
+ * they are.
  */
 export function styleVariables(style: InAppStyle): Record<string, string> {
   const variables: Record<string, string> = {};
-  if (style.backgroundColor) variables['--ni-bg'] = style.backgroundColor;
-  if (style.textColor) variables['--ni-fg'] = style.textColor;
-  if (style.buttonColor) variables['--ni-btn-bg'] = style.buttonColor;
-  if (style.buttonTextColor) variables['--ni-btn-fg'] = style.buttonTextColor;
+
+  let surface = style.backgroundColor;
+  if (surface) {
+    variables['--ni-bg'] = surface;
+    if (!style.textColor) variables['--ni-fg'] = readableOn(surface, LIGHT_TEXT, DARK_TEXT);
+  }
+  if (style.textColor) {
+    variables['--ni-fg'] = style.textColor;
+    if (!surface) {
+      surface = readableOn(style.textColor, LIGHT_SURFACE, DARK_SURFACE);
+      variables['--ni-bg'] = surface;
+    }
+  }
+  if (surface) {
+    // The outline of the secondary button follows the panel it sits on.
+    variables['--ni-border'] =
+      readableOn(surface, LIGHT_TEXT, DARK_TEXT) === DARK_TEXT
+        ? 'rgba(0, 0, 0, 0.18)'
+        : 'rgba(255, 255, 255, 0.24)';
+  }
+
+  if (style.buttonColor) {
+    variables['--ni-btn-bg'] = style.buttonColor;
+    if (!style.buttonTextColor) {
+      variables['--ni-btn-fg'] = readableOn(style.buttonColor, LIGHT_TEXT, DARK_TEXT);
+    }
+  }
+  if (style.buttonTextColor) {
+    variables['--ni-btn-fg'] = style.buttonTextColor;
+    if (!style.buttonColor) {
+      variables['--ni-btn-bg'] = readableOn(style.buttonTextColor, LIGHT_TEXT, DARK_TEXT);
+    }
+  }
+
   variables['--ni-align'] = style.textAlign;
   return variables;
 }
