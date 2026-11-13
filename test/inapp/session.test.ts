@@ -276,28 +276,46 @@ describe('click and dismiss (WIAM-06)', () => {
     }
   );
 
-  it('reports the impression before the click, even when the impression is slow', async () => {
+  it('sends the click at once, without waiting for a slow impression', async () => {
     let releaseImpression: (() => void) | undefined;
-    const sent: string[] = [];
+    const started: string[] = [];
     const s = setup(async (req) => {
       if (req.url.endsWith('/eligible')) return jsonResponse(200, { messages: [wire('m1')] });
       const type = (req.body as { type: string }).type;
+      started.push(type);
       if (type === 'impression') {
         await new Promise<void>((resolve) => (releaseImpression = resolve));
       }
-      sent.push(type);
+      return jsonResponse(201, {});
+    });
+    await s.start();
+    await settle();
+    expect(started).toEqual(['impression']);
+
+    s.view.handlers?.onClick('b1', { type: 'url', value: 'https://x.example' });
+    await settle();
+    // The impression is still in flight and the click is already on its way.
+    expect(started).toEqual(['impression', 'click']);
+
+    releaseImpression?.();
+    await settle();
+  });
+
+  it('sends the dismiss at once, without waiting for a slow impression', async () => {
+    const started: string[] = [];
+    const s = setup(async (req) => {
+      if (req.url.endsWith('/eligible')) return jsonResponse(200, { messages: [wire('m1')] });
+      const type = (req.body as { type: string }).type;
+      started.push(type);
+      if (type === 'impression') await new Promise<void>(() => undefined);
       return jsonResponse(201, {});
     });
     await s.start();
     await settle();
 
-    s.view.handlers?.onClick('b1', { type: 'url', value: 'https://x.example' });
+    s.view.handlers?.onDismiss('close_button');
     await settle();
-    expect(sent).toEqual([]);
-
-    releaseImpression?.();
-    await settle();
-    expect(sent).toEqual(['impression', 'click']);
+    expect(started).toEqual(['impression', 'dismiss']);
   });
 
   it('counts one interaction per display: a second click or dismiss is ignored', async () => {
@@ -518,6 +536,41 @@ describe('errors and rate limits (WIAM-09)', () => {
     expect(warning).not.toContain('app-1');
   });
 
+  describe('an answer from /events that says the server does not accept this browser', () => {
+    const eventsFail = (status: number) => (req: RecordedRequest) =>
+      req.url.endsWith('/eligible')
+        ? jsonResponse(200, { messages: [wire('m1'), onEvent('buy')] })
+        : failing(status)();
+
+    it.each([401, 403])('stops the session on a %i, so later events and messages stay quiet', async (status) => {
+      const s = setup(eventsFail(status));
+      await s.start();
+      await settle();
+      expect(s.view.shown).toEqual(['m1']);
+      expect(eventsOf(s.requests)).toHaveLength(1);
+
+      s.session.trackEvent('buy');
+      await settle();
+
+      expect(s.view.shown).toEqual(['m1']);
+      expect(eventsOf(s.requests)).toHaveLength(1);
+      expect(s.view.closed).toBeGreaterThan(0);
+    });
+
+    it('does not stop for an error it could not fix by stopping (422, 503)', async () => {
+      for (const status of [422, 503]) {
+        const s = setup(eventsFail(status));
+        await s.start();
+        await settle();
+        s.view.handlers?.onDismiss('close_button');
+        await settle();
+        s.session.trackEvent('buy');
+        await settle();
+        expect(s.view.shown, String(status)).toEqual(['m1', 'ev-buy']);
+      }
+    });
+  });
+
   it.each([
     ['422', 422],
     ['404', 404],
@@ -642,3 +695,97 @@ describe('errors and rate limits (WIAM-09)', () => {
     expect(fake.requests).toHaveLength(0);
   });
 });
+
+describe('a 403 from eligible is remembered for a day', () => {
+  const denied = () =>
+    new Response(JSON.stringify({ error: { code: 'forbidden' } }), {
+      status: 403,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  const DAY = 24 * 60 * 60 * 1000;
+
+  /** One page load on a runtime that keeps its store between loads. */
+  function pageLoad(fake: ReturnType<typeof fakeRuntime>) {
+    const warnings: string[] = [];
+    const view = new FakeView();
+    const session = createInAppSession({ view, onClick: vi.fn(), warn: (m) => warnings.push(m) });
+    return { warnings, view, start: () => session.start(state, fake.runtime) };
+  }
+
+  function sharedRuntime(respond: (req: RecordedRequest) => Response, deviceOverride = device) {
+    const fake = fakeRuntime(respond);
+    let now = Date.UTC(2026, 10, 13, 10, 0, 0);
+    fake.runtime.now = () => now;
+    void fake.store.set(DEVICE_KEY, deviceOverride);
+    return { fake, advance: (ms: number) => (now += ms) };
+  }
+
+  it('logs once and does not ask again on the next page loads of the day', async () => {
+    const { fake, advance } = sharedRuntime(() => denied());
+
+    const first = pageLoad(fake);
+    await first.start();
+    expect(first.warnings).toHaveLength(1);
+    expect(fake.requests).toHaveLength(1);
+
+    advance(60 * 60 * 1000);
+    const second = pageLoad(fake);
+    await second.start();
+    expect(second.warnings).toEqual([]);
+    expect(fake.requests).toHaveLength(1);
+    expect(second.view.shown).toEqual([]);
+  });
+
+  it('asks again after a day', async () => {
+    const { fake, advance } = sharedRuntime(() => denied());
+    await pageLoad(fake).start();
+
+    advance(DAY);
+    const later = pageLoad(fake);
+    await later.start();
+    expect(fake.requests).toHaveLength(2);
+    expect(later.warnings).toHaveLength(1);
+  });
+
+  it('forgets the denial once the server accepts the browser again', async () => {
+    let accept = false;
+    const { fake, advance } = sharedRuntime(() =>
+      accept ? jsonResponse(200, { messages: [wire('m1')] }) : denied()
+    );
+    await pageLoad(fake).start();
+
+    advance(DAY);
+    accept = true;
+    const ok = pageLoad(fake);
+    await ok.start();
+    expect(ok.view.shown).toEqual(['m1']);
+    expect(await fake.store.get('inapp-denied')).toBeUndefined();
+  });
+
+  it('does not apply a denial of another device', async () => {
+    const { fake } = sharedRuntime(() => denied());
+    await pageLoad(fake).start();
+    await fake.store.set(DEVICE_KEY, { ...device, id: 'dev-2' });
+
+    await pageLoad(fake).start();
+    expect(fake.requests).toHaveLength(2);
+  });
+
+  it('does not remember an answer other than 403', async () => {
+    const { fake } = sharedRuntime(() => jsonResponse(503, {}));
+    await pageLoad(fake).start();
+    await pageLoad(fake).start();
+    expect(fake.requests).toHaveLength(2);
+  });
+
+  it('still logs and stops when the store cannot keep the memory', async () => {
+    const { fake } = sharedRuntime(() => denied());
+    const real = fake.store;
+    fake.runtime.store = { ...real, set: (key, value) => (key === 'inapp-denied' ? Promise.reject(new Error('quota')) : real.set(key, value)) };
+    const load = pageLoad(fake);
+    await load.start();
+    expect(load.warnings).toHaveLength(1);
+    expect(load.view.shown).toEqual([]);
+  });
+});
+
