@@ -25,5 +25,18 @@ export default tseslint.config(
     },
   },
   ...tseslint.configs.recommended,
+  {
+    // Message text comes from an author and goes in as text only (textContent).
+    files: ['src/inapp/**/*.ts'],
+    rules: {
+      'no-restricted-properties': [
+        'error',
+        ...['innerHTML', 'outerHTML', 'insertAdjacentHTML'].map((property) => ({
+          property,
+          message: 'In-App text is set with textContent, never as HTML.',
+        })),
+      ],
+    },
+  },
   prettier
 );

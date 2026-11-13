@@ -1,6 +1,7 @@
 import type { ApiConfig, Fetcher } from './api';
 import { browserEnv, type BrowserEnv } from './capabilities';
 import { realSleep, type Sleep } from './retry';
+import { pageSession } from './inapp/page';
 import { idbStore, type Store } from './store';
 
 /** Everything the SDK touches outside its own code, injectable for tests. */
@@ -13,6 +14,8 @@ export interface Runtime {
   now?: () => number;
   /** Web Locks, shared by the tabs of one origin; absent where unsupported. */
   locks?: Pick<LockManager, 'request'>;
+  /** Starts In-App messages once `init` is done; absent in tests that do not cover it. */
+  inApp?: { start(state: SdkState, runtime: Runtime): Promise<void> };
 }
 
 export const nowOf = (runtime: Runtime): number =>
@@ -28,6 +31,7 @@ export function defaultRuntime(): Runtime {
     store: (sharedStore ??= idbStore()),
     sleep: realSleep,
     locks: globalThis.navigator?.locks,
+    inApp: pageSession(),
   };
 }
 
