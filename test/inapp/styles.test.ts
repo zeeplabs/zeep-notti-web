@@ -77,9 +77,68 @@ describe('styleVariables', () => {
       expect(tokens({ buttonTextColor: '#1A1A1A' })['--ni-btn-bg']).toBe('#FFFFFF');
     });
 
-    it('leaves the button alone when only the panel was styled, and the panel when only the button was', () => {
-      expect(tokens({ backgroundColor: '#102030' })['--ni-btn-bg']).toBeUndefined();
+    it('leaves the panel alone when only the button was styled', () => {
       expect(tokens({ buttonColor: '#E94B8B' })['--ni-bg']).toBeUndefined();
+    });
+
+    it('keeps a button colour the author chose even on a styled panel', () => {
+      expect(tokens({ backgroundColor: '#102030', buttonColor: '#1A1A1A' })['--ni-btn-bg']).toBe('#1A1A1A');
+    });
+
+    describe('the button stands out from a panel the author coloured', () => {
+      const luminance = (hex: string) => {
+        const c = (i: number) => {
+          const v = parseInt(hex.slice(i, i + 2), 16) / 255;
+          return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+        };
+        return 0.2126 * c(1) + 0.7152 * c(3) + 0.0722 * c(5);
+      };
+      const contrast = (a: string, b: string) => {
+        const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [number, number];
+        return (hi + 0.05) / (lo + 0.05);
+      };
+
+      // Neither default may survive on these panels: the dark button (#1A1A1A) of the light
+      // scheme melts into the dark panels, the light one (#F2F2F2) of the dark scheme into the light ones.
+      const panels = ['#102030', '#000000', '#1F1F1F', '#0B3D91', '#FFFFFF', '#F2F2F2', '#FFF4D6', '#E8F0FE'];
+
+      it.each(panels)('with only background_color %s', (backgroundColor) => {
+        const t = tokens({ backgroundColor });
+        expect(t['--ni-btn-bg']).toBeDefined();
+        expect(contrast(t['--ni-btn-bg']!, backgroundColor)).toBeGreaterThanOrEqual(3);
+        expect(contrast(t['--ni-btn-fg']!, t['--ni-btn-bg']!)).toBeGreaterThanOrEqual(4.5);
+      });
+
+      it('with only a light text colour, which gets a dark panel', () => {
+        const t = tokens({ textColor: '#FFFFFF' });
+        expect(contrast(t['--ni-btn-bg']!, t['--ni-bg']!)).toBeGreaterThanOrEqual(3);
+        expect(t['--ni-btn-bg']).toBe('#FFFFFF');
+        expect(t['--ni-btn-fg']).toBe('#1A1A1A');
+      });
+
+      it('with only a dark text colour, which gets a light panel', () => {
+        const t = tokens({ textColor: '#111111' });
+        expect(contrast(t['--ni-btn-bg']!, t['--ni-bg']!)).toBeGreaterThanOrEqual(3);
+        expect(t['--ni-btn-bg']).toBe('#1A1A1A');
+      });
+
+      it('picks the stock colour that reads best under a button text colour, if it still stands out', () => {
+        const t = tokens({ backgroundColor: '#102030', buttonTextColor: '#102030' });
+        expect(t['--ni-btn-bg']).toBe('#FFFFFF');
+        expect(t['--ni-btn-fg']).toBe('#102030');
+      });
+
+      it('gives up the button text colour before letting the button vanish or the label go unreadable', () => {
+        // White text asks for the dark button, which would melt into this dark panel.
+        const t = tokens({ backgroundColor: '#102030', buttonTextColor: '#FFFFFF' });
+        expect(contrast(t['--ni-btn-bg']!, '#102030')).toBeGreaterThanOrEqual(3);
+        expect(contrast(t['--ni-btn-fg']!, t['--ni-btn-bg']!)).toBeGreaterThanOrEqual(4.5);
+      });
+
+      it('does not touch the button when the author set nothing about the panel', () => {
+        expect(tokens({ buttonTextColor: '#FFFFFF' })['--ni-btn-bg']).toBe('#1A1A1A');
+        expect(tokens()['--ni-btn-bg']).toBeUndefined();
+      });
     });
   });
 });

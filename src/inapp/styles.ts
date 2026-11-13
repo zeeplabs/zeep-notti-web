@@ -25,6 +25,24 @@ function readableOn(against: string, light: string, dark: string): string {
   return contrast(light, against) >= contrast(dark, against) ? light : dark;
 }
 
+/** WCAG 1.4.11: the least contrast a UI component needs against what surrounds it. */
+const MIN_COMPONENT_CONTRAST = 3;
+/** WCAG 1.4.3: the least contrast text needs against its background. */
+const MIN_TEXT_CONTRAST = 4.5;
+
+/**
+ * The button colour for a panel the author coloured: the one of the two stock
+ * colours that stands out from the panel. With a button text colour already set,
+ * the one that reads best under it, as long as it still stands out from the panel.
+ */
+function buttonOn(surface: string, buttonText: string | undefined): string {
+  const best = readableOn(surface, LIGHT_TEXT, DARK_TEXT);
+  if (!buttonText) return best;
+  const other = best === LIGHT_TEXT ? DARK_TEXT : LIGHT_TEXT;
+  const preferred = readableOn(buttonText, best, other);
+  return contrast(preferred, surface) >= MIN_COMPONENT_CONTRAST ? preferred : best;
+}
+
 /**
  * Custom properties for the tokens the author set. A token the author left out
  * keeps the stylesheet default (and its dark variant), except when its partner
@@ -59,15 +77,22 @@ export function styleVariables(style: InAppStyle): Record<string, string> {
 
   if (style.buttonColor) {
     variables['--ni-btn-bg'] = style.buttonColor;
-    if (!style.buttonTextColor) {
-      variables['--ni-btn-fg'] = readableOn(style.buttonColor, LIGHT_TEXT, DARK_TEXT);
-    }
-  }
-  if (style.buttonTextColor) {
+    variables['--ni-btn-fg'] =
+      style.buttonTextColor ?? readableOn(style.buttonColor, LIGHT_TEXT, DARK_TEXT);
+  } else if (surface) {
+    // The button default also follows the visitor's colour scheme, so on a panel the
+    // author coloured it can melt into it (a dark button on a dark panel). Give it
+    // the colour that stands out from the panel, and keep the author's label colour
+    // unless it cannot be read on that button.
+    const button = buttonOn(surface, style.buttonTextColor);
+    variables['--ni-btn-bg'] = button;
+    variables['--ni-btn-fg'] =
+      style.buttonTextColor && contrast(style.buttonTextColor, button) >= MIN_TEXT_CONTRAST
+        ? style.buttonTextColor
+        : readableOn(button, LIGHT_TEXT, DARK_TEXT);
+  } else if (style.buttonTextColor) {
     variables['--ni-btn-fg'] = style.buttonTextColor;
-    if (!style.buttonColor) {
-      variables['--ni-btn-bg'] = readableOn(style.buttonTextColor, LIGHT_TEXT, DARK_TEXT);
-    }
+    variables['--ni-btn-bg'] = readableOn(style.buttonTextColor, LIGHT_TEXT, DARK_TEXT);
   }
 
   variables['--ni-align'] = style.textAlign;
