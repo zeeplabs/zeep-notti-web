@@ -69,4 +69,72 @@ describe('reportInAppEvent', () => {
     ).rejects.toMatchObject({ status: 422 });
     expect(fake.requests).toHaveLength(1);
   });
+
+  describe('keepalive', () => {
+    const event = { eventId: 'e1', type: 'impression' as const, occurredAt: 0 };
+
+    /** A fetch that records `keepalive` and refuses it the way a browser does for a preflighted request. */
+    function refusingKeepalive(refuse: boolean) {
+      const sent: Array<boolean | undefined> = [];
+      const fake = fakeRuntime(() => jsonResponse(201, { duplicate: false }));
+      fake.runtime.fetch = (_input, init) => {
+        sent.push(init?.keepalive);
+        if (refuse && init?.keepalive) return Promise.reject(new TypeError('Failed to fetch'));
+        return Promise.resolve(jsonResponse(201, { duplicate: false }));
+      };
+      return { fake, sent };
+    }
+
+    it('asks for keepalive first', async () => {
+      const { fake, sent } = refusingKeepalive(false);
+      await reportInAppEvent(fake.runtime, config, device, 'm1', event);
+      expect(sent).toEqual([true]);
+    });
+
+    it('repeats once without keepalive when the browser refuses it, without waiting', async () => {
+      const { fake, sent } = refusingKeepalive(true);
+      await reportInAppEvent(fake.runtime, config, device, 'm1', event);
+      expect(sent).toEqual([true, undefined]);
+      expect(fake.sleeps).toEqual([]);
+    });
+
+    it('keeps the same event_id on the repeat', async () => {
+      const bodies: unknown[] = [];
+      const fake = fakeRuntime(() => jsonResponse(201, {}));
+      fake.runtime.fetch = (_input, init) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        return init?.keepalive
+          ? Promise.reject(new TypeError('Failed to fetch'))
+          : Promise.resolve(jsonResponse(201, {}));
+      };
+      await reportInAppEvent(fake.runtime, config, device, 'm1', event);
+      expect(bodies).toHaveLength(2);
+      expect(bodies[1]).toEqual(bodies[0]);
+    });
+
+    it('does not turn keepalive off for an answer from the server', async () => {
+      const sent: Array<boolean | undefined> = [];
+      const fake = fakeRuntime(() => jsonResponse(503, {}));
+      fake.runtime.fetch = (_input, init) => {
+        sent.push(init?.keepalive);
+        return Promise.resolve(jsonResponse(503, {}));
+      };
+      await expect(reportInAppEvent(fake.runtime, config, device, 'm1', event)).rejects.toMatchObject({
+        status: 503,
+      });
+      expect(sent).toEqual([true, true, true]);
+    });
+
+    it('still gives up when the network is really down', async () => {
+      const fake = fakeRuntime(() => jsonResponse(201, {}));
+      let calls = 0;
+      fake.runtime.fetch = () => {
+        calls++;
+        return Promise.reject(new TypeError('Failed to fetch'));
+      };
+      await expect(reportInAppEvent(fake.runtime, config, device, 'm1', event)).rejects.toThrow(TypeError);
+      // 3 attempts; the first one also tried again without keepalive.
+      expect(calls).toBe(4);
+    });
+  });
 });
