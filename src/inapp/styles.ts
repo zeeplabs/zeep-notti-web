@@ -112,6 +112,7 @@ export const STYLESHEET = `
 @media (prefers-reduced-motion: reduce) { .ni { animation: none; } }
 
 .backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.5); pointer-events: auto; }
+.backdrop.shield { background: transparent; }
 
 .panel {
   position: absolute;
