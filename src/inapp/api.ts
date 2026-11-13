@@ -45,6 +45,12 @@ export async function fetchEligible(
  * `POST /in-app-messages/{id}/events`, with `keepalive` so a page that
  * navigates away does not cancel it. Retried with the bounded backoff; the
  * same `event_id` goes out each time, so a retry cannot double count.
+ *
+ * A browser may refuse `keepalive` on a request that needs a CORS preflight
+ * (this one carries `Authorization`): `fetch` then rejects with a TypeError, the
+ * same error a network failure gives. The first such failure turns `keepalive`
+ * off for the rest of this event, so a refusal costs one repeated request and
+ * never the event.
  */
 export async function reportInAppEvent(
   runtime: Runtime,
@@ -63,19 +69,19 @@ export async function reportInAppEvent(
   if (event.buttonId !== undefined) body['button_id'] = event.buttonId;
   if (event.reason !== undefined) body['reason'] = event.reason;
 
-  await withRetry(
-    () =>
-      request(
-        runtime.fetch,
-        config,
-        'POST',
-        `${inAppPath(config)}/${encodeURIComponent(messageId)}/events`,
-        body,
-        undefined,
-        true
-      ),
-    runtime.sleep
-  );
+  const path = `${inAppPath(config)}/${encodeURIComponent(messageId)}/events`;
+  let keepalive = true;
+  const send = () => request(runtime.fetch, config, 'POST', path, body, undefined, keepalive);
+
+  await withRetry(async () => {
+    try {
+      await send();
+    } catch (err) {
+      if (!keepalive || !(err instanceof TypeError)) throw err;
+      keepalive = false;
+      await send();
+    }
+  }, runtime.sleep);
 }
 
 /** A UUID v4. `randomUUID` needs a secure context; the fallback does not. */

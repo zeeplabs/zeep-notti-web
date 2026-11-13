@@ -72,13 +72,27 @@ function httpsUrl(value: unknown): string | undefined {
   }
 }
 
+/** Schemes a deeplink must never carry: they run code or read files in the page that follows it. */
+const UNSAFE_SCHEME = /^(javascript|data|vbscript|file):/i;
+
+/**
+ * The SDK is the last barrier before a link reaches the integrator's page, so it
+ * does not rely on the server alone: a `url` must be https, and a `deeplink` must
+ * not be a script-running scheme. Leading whitespace and control characters are
+ * ignored by browsers when they read a scheme, so they are ignored here too.
+ */
 function linkAction(value: unknown): LinkAction | undefined {
   if (!isObject(value)) return undefined;
   const { type, value: target } = value;
   if ((type !== 'url' && type !== 'deeplink') || typeof target !== 'string' || !target) {
     return undefined;
   }
-  return { type, value: target };
+  if (type === 'url') {
+    return httpsUrl(target) === undefined ? undefined : { type, value: target };
+  }
+  // eslint-disable-next-line no-control-regex
+  const scheme = target.replace(/^[\u0000-\u0020]+/, '').replace(/[\t\r\n]/g, '');
+  return UNSAFE_SCHEME.test(scheme) ? undefined : { type, value: target };
 }
 
 function parseButtons(value: unknown): InAppButton[] {

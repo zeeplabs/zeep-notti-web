@@ -1,6 +1,11 @@
 import { ApiError } from '../api';
-import type { Runtime, SdkState } from '../runtime';
-import { DEVICE_KEY, type StoredDevice } from '../store';
+import { nowOf, type Runtime, type SdkState } from '../runtime';
+import {
+  DEVICE_KEY,
+  INAPP_DENIED_KEY,
+  type StoredDevice,
+  type StoredInAppDenial,
+} from '../store';
 import {
   fetchEligible,
   newEventId,
@@ -51,11 +56,17 @@ const MAX_RATE_LIMIT_WAITS = 3;
 const DEFAULT_RETRY_AFTER_SECONDS = 60;
 const MIN_RETRY_AFTER_SECONDS = 1;
 const MAX_RETRY_AFTER_SECONDS = 300;
+/** How long a 403 from `eligible` keeps later page loads from asking again. */
+const DENIAL_MEMORY_MS = 24 * 60 * 60 * 1000;
 
 interface Visible {
   message: InAppMessage;
   /** The first interaction wins; later ones are ignored. */
   done: boolean;
+}
+
+function slotOf(message: InAppMessage): 'blocking' | 'bar' {
+  return message.format === 'top' || message.format === 'bottom' ? 'bar' : 'blocking';
 }
 
 export function createInAppSession(deps: SessionDeps): InAppSession {
@@ -70,21 +81,15 @@ export function createInAppSession(deps: SessionDeps): InAppSession {
   let ready = false;
   let held: InAppMessage[] = [];
   const shown = new Set<string>();
+  // One blocking message (center, full) and one bar (top, bottom) per page load, like the
+  // mobile SDKs' one modal per session: a page that fires several events must not turn into
+  // a stack of overlays. Only a message that actually appeared uses its slot.
+  const slotsUsed = new Set<'blocking' | 'bar'>();
   const remembered: string[] = [];
   let visible: Visible | null = null;
   let context: { runtime: Runtime; state: SdkState; device: StoredDevice } | null = null;
-  // Events go out in order, so an impression always precedes the click after it.
-  let tail: Promise<void> | null = null;
 
-  function enqueue(task: () => Promise<void>): void {
-    const run = () => task().catch(() => undefined);
-    const next = tail ? tail.then(run) : run();
-    tail = next;
-    void next.then(() => {
-      if (tail === next) tail = null;
-    });
-  }
-
+  /** Fire and forget: the visitor is never kept waiting for a report. */
   function report(message: InAppMessage, partial: Omit<InAppEvent, 'eventId' | 'occurredAt'>): void {
     if (!context) return;
     const { runtime, state, device } = context;
@@ -93,7 +98,21 @@ export function createInAppSession(deps: SessionDeps): InAppSession {
       eventId: makeEventId(),
       occurredAt: (runtime.now ?? Date.now)(),
     };
-    enqueue(() => reportInAppEvent(runtime, state.config, device, message.id, event));
+    // Each event leaves at once, not behind the one before it: a click that waited for a
+    // slow impression would be lost when the listener navigates away. The server does not
+    // need them in order (it keeps `occurred_at` and ignores a repeated `event_id`).
+    void reportInAppEvent(runtime, state.config, device, message.id, event).catch((err: unknown) => {
+      // The server no longer accepts this browser: stop asking, like a 401 or 403 from eligible.
+      if (err instanceof ApiError && (err.status === 401 || err.status === 403)) endSession();
+    });
+  }
+
+  /** Ends the session: closes what is visible and discards late answers. */
+  function endSession(): void {
+    if (stopped && !visible) return;
+    stopped = true;
+    held = [];
+    if (visible) closeVisible();
   }
 
   function closeVisible(): Visible | null {
@@ -140,6 +159,7 @@ export function createInAppSession(deps: SessionDeps): InAppSession {
     }
     if (!ok) return false;
     visible = { message, done: false };
+    slotsUsed.add(slotOf(message));
     report(message, { type: 'impression' });
     return true;
   }
@@ -149,7 +169,7 @@ export function createInAppSession(deps: SessionDeps): InAppSession {
     if (busy || stopped) return false;
     busy = true;
     for (const message of candidates) {
-      if (shown.has(message.id)) continue;
+      if (shown.has(message.id) || slotsUsed.has(slotOf(message))) continue;
       if (await present(message)) return true;
       if (stopped) break;
     }
@@ -160,6 +180,27 @@ export function createInAppSession(deps: SessionDeps): InAppSession {
   function showForEvent(name: string): Promise<boolean> {
     const candidates = held.filter((m) => m.trigger.type === 'event' && m.trigger.name === name);
     return presentFirst(candidates);
+  }
+
+  async function rememberDenial(runtime: Runtime, device: StoredDevice): Promise<void> {
+    const denial: StoredInAppDenial = { deviceId: device.id, at: nowOf(runtime) };
+    try {
+      await runtime.store.set(INAPP_DENIED_KEY, denial);
+    } catch {
+      // Without the memory the next page load asks once more, which is only noise.
+    }
+  }
+
+  /** The 403 an earlier page load stored for this very device, if it is less than a day old. */
+  async function recentDenial(runtime: Runtime, device: StoredDevice): Promise<'recent' | 'stale' | 'none'> {
+    try {
+      const denial = await runtime.store.get<StoredInAppDenial>(INAPP_DENIED_KEY);
+      if (!denial) return 'none';
+      const age = nowOf(runtime) - denial.at;
+      return denial.deviceId === device.id && age >= 0 && age < DENIAL_MEMORY_MS ? 'recent' : 'stale';
+    } catch {
+      return 'none';
+    }
   }
 
   async function fetchWithWaits(): Promise<InAppMessage[] | null> {
@@ -173,6 +214,7 @@ export function createInAppSession(deps: SessionDeps): InAppSession {
         if (err.status === 403) {
           // No ids: this line can end up in a customer's console and bug reports.
           warn('[Notti] In-App messages are off for this page: the server did not accept this browser.');
+          await rememberDenial(runtime, device);
           return null;
         }
         if (err.status !== 429 || waits >= MAX_RATE_LIMIT_WAITS || stopped) return null;
@@ -200,7 +242,16 @@ export function createInAppSession(deps: SessionDeps): InAppSession {
     }
     context = { runtime, state, device };
 
+    // A 403 earlier today (a device deleted on the server stays stored here): no request, no log.
+    const denial = await recentDenial(runtime, device);
+    if (denial === 'recent') {
+      stopped = true;
+      return;
+    }
+
     const messages = await fetchWithWaits();
+    // The server accepts this browser again: forget the old 403.
+    if (messages && denial === 'stale') await runtime.store.delete(INAPP_DENIED_KEY).catch(() => undefined);
     if (stopped) return;
     if (!messages) {
       stopped = true;
@@ -239,11 +290,6 @@ export function createInAppSession(deps: SessionDeps): InAppSession {
       void showForEvent(name);
     },
 
-    stop() {
-      if (stopped && !visible) return;
-      stopped = true;
-      held = [];
-      if (visible) closeVisible();
-    },
+    stop: endSession,
   };
 }

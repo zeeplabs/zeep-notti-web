@@ -9,6 +9,11 @@ export interface ViewEnv {
   loadImage(src: string): Promise<boolean>;
   /** The visitor's language, for the close control. */
   language: string;
+  /**
+   * Whether the overlay's stylesheet took effect. Only asked when the styles went in as a
+   * `<style>` element, which a strict `style-src` blocks without telling anyone.
+   */
+  stylesApplied(root: HTMLElement): boolean;
 }
 
 export const IMAGE_TIMEOUT_MS = 3000;
@@ -66,6 +71,11 @@ function defaultEnv(): ViewEnv {
     document: globalThis.document,
     loadImage: (src) => preloadImage(src),
     language: globalThis.navigator?.language ?? 'en',
+    stylesApplied: (root) => {
+      const view = root.ownerDocument.defaultView;
+      // The stylesheet makes the overlay `position: fixed`; unstyled, it is `static`.
+      return !view || view.getComputedStyle(root).position === 'fixed';
+    },
   };
 }
 
@@ -73,8 +83,11 @@ function labelsFor(language: string): (typeof LABELS)[keyof typeof LABELS] {
   return language.toLowerCase().startsWith('pt') ? LABELS['pt-BR'] : LABELS.en;
 }
 
-/** Constructable stylesheets are not blocked by a strict `style-src`; a <style> element is. */
-function applyStyles(shadow: ShadowRoot, doc: Document): void {
+/**
+ * Constructable stylesheets are not blocked by a strict `style-src`; a <style> element is.
+ * Says which way the styles went in, because only the second can be silently refused.
+ */
+function applyStyles(shadow: ShadowRoot, doc: Document): 'adopted' | 'element' {
   try {
     if (
       'adoptedStyleSheets' in shadow &&
@@ -84,7 +97,7 @@ function applyStyles(shadow: ShadowRoot, doc: Document): void {
       const sheet = new CSSStyleSheet();
       sheet.replaceSync(STYLESHEET);
       shadow.adoptedStyleSheets = [sheet];
-      return;
+      return 'adopted';
     }
   } catch {
     // Fall through to the element.
@@ -92,6 +105,7 @@ function applyStyles(shadow: ShadowRoot, doc: Document): void {
   const style = doc.createElement('style');
   style.textContent = STYLESHEET;
   shadow.append(style);
+  return 'element';
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(
@@ -122,6 +136,8 @@ interface Built {
   root: HTMLElement;
   panel: HTMLElement;
   modal: boolean;
+  /** True when the styles went in as a `<style>` element, the path a strict CSP can refuse. */
+  elementStyles: boolean;
 }
 
 interface Active extends Built {
@@ -145,7 +161,7 @@ function build(
   // The page's own `div` rules must not reach the host; the overlay is `position: fixed` inside.
   host.style.cssText = 'all: initial !important; display: block !important;';
   const shadow = host.attachShadow({ mode: 'open' });
-  applyStyles(shadow, doc);
+  const styleWay = applyStyles(shadow, doc);
 
   const root = element(doc, 'div', `ni layout-${message.format}`);
   if (!message.style.margin) root.classList.add('no-margin');
@@ -155,10 +171,19 @@ function build(
     root.style.setProperty(property, value);
   }
 
+  // A click on the page behind a dialog must not take focus out of it (focus on `body` ends the Tab trap).
+  const keepFocus = (event: Event) => event.preventDefault();
   if (message.format === 'center') {
     const backdrop = element(doc, 'div', 'backdrop');
+    backdrop.addEventListener('mousedown', keepFocus);
     backdrop.addEventListener('click', () => handlers.onDismiss('outside_tap'));
     root.append(backdrop);
+  } else if (message.format === 'full') {
+    // `full` is modal too, but it has no outside to tap: the margin around the panel is a transparent
+    // shield, so the page behind it is not clickable and focus stays inside. It does not dismiss.
+    const shield = element(doc, 'div', 'backdrop shield');
+    shield.addEventListener('mousedown', keepFocus);
+    root.append(shield);
   }
 
   const panel = element(doc, 'div', 'panel');
@@ -190,6 +215,8 @@ function build(
   }
 
   const text = element(doc, 'div', 'text');
+  // A bar is not a dialog, so nothing announces it: its text is a polite live region.
+  if (!modal) text.setAttribute('aria-live', 'polite');
   if (message.title) {
     const title = element(doc, 'h2', 'title', message.title);
     title.id = 'ni-title';
@@ -237,7 +264,7 @@ function build(
 
   root.append(panel);
   shadow.append(root);
-  return { host, shadow, root, panel, modal };
+  return { host, shadow, root, panel, modal, elementStyles: styleWay === 'element' };
 }
 
 /** The real overlay: one host with an open Shadow root, removed on close. */
@@ -283,31 +310,67 @@ export function createDomView(overrides: Partial<ViewEnv> = {}): InAppView {
     doc: Document,
     seconds: number,
     onDismiss: (reason: DismissReason) => void,
-    cleanups: Array<() => void>
+    cleanups: Array<() => void>,
+    /** A bar: the countdown also waits while the visitor points at it or has focus inside it. */
+    holdOn?: HTMLElement
   ): void {
     let remaining = seconds * 1000;
     let startedAt = Date.now();
-    let timer: ReturnType<typeof setTimeout> | undefined = setTimeout(
-      () => onDismiss('auto'),
-      remaining
-    );
-    // The countdown does not run while nobody can see the message.
-    const onChange = () => {
-      if (doc.visibilityState === 'hidden' && timer !== undefined) {
-        clearTimeout(timer);
-        timer = undefined;
-        remaining -= Date.now() - startedAt;
-      } else if (doc.visibilityState === 'visible' && timer === undefined) {
-        startedAt = Date.now();
-        timer = setTimeout(() => onDismiss('auto'), Math.max(0, remaining));
-      }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let hidden = doc.visibilityState === 'hidden';
+    let hovered = false;
+    let focused = false;
+
+    const pause = () => {
+      if (timer === undefined) return;
+      clearTimeout(timer);
+      timer = undefined;
+      remaining -= Date.now() - startedAt;
     };
-    doc.addEventListener('visibilitychange', onChange);
+    const resume = () => {
+      if (timer !== undefined) return;
+      startedAt = Date.now();
+      timer = setTimeout(() => onDismiss('auto'), Math.max(0, remaining));
+    };
+    // The countdown does not run while nobody can see the message, or is reading it.
+    const sync = () => (hidden || hovered || focused ? pause() : resume());
+
+    const onVisibility = () => {
+      hidden = doc.visibilityState === 'hidden';
+      sync();
+    };
+    doc.addEventListener('visibilitychange', onVisibility);
     cleanups.push(() => {
-      doc.removeEventListener('visibilitychange', onChange);
+      doc.removeEventListener('visibilitychange', onVisibility);
       if (timer !== undefined) clearTimeout(timer);
       timer = undefined;
     });
+
+    if (holdOn) {
+      const target = holdOn;
+      const on = (type: string, handler: (event: Event) => void) => {
+        target.addEventListener(type, handler);
+        cleanups.push(() => target.removeEventListener(type, handler));
+      };
+      on('mouseenter', () => {
+        hovered = true;
+        sync();
+      });
+      on('mouseleave', () => {
+        hovered = false;
+        sync();
+      });
+      on('focusin', () => {
+        focused = true;
+        sync();
+      });
+      on('focusout', (event) => {
+        const next = (event as FocusEvent).relatedTarget;
+        focused = next instanceof Node && target.contains(next);
+        sync();
+      });
+    }
+    sync();
   }
 
   function trapTab(built: Built, event: KeyboardEvent): void {
@@ -347,13 +410,19 @@ export function createDomView(overrides: Partial<ViewEnv> = {}): InAppView {
       const built = build(doc, message, handlers, labelsFor(env.language));
       const cleanups: Array<() => void> = [];
       const previous = doc.activeElement;
+      doc.body.append(built.host);
+      // A page whose CSP blocks the `<style>` fallback would show the text unstyled at the end of the
+      // page. Better nothing, and no impression for something nobody saw.
+      if (built.elementStyles && !env.stylesApplied(built.root)) {
+        built.host.remove();
+        return false;
+      }
       active = {
         ...built,
         cleanups,
         returnFocusTo:
           built.modal && previous instanceof HTMLElement && previous !== doc.body ? previous : null,
       };
-      doc.body.append(built.host);
 
       if (built.modal) {
         // Esc is heard on the document so it works wherever focus ended up.
@@ -374,7 +443,13 @@ export function createDomView(overrides: Partial<ViewEnv> = {}): InAppView {
       }
 
       if (message.dismissAfterSeconds !== undefined) {
-        startAutoDismiss(doc, message.dismissAfterSeconds, handlers.onDismiss, cleanups);
+        startAutoDismiss(
+          doc,
+          message.dismissAfterSeconds,
+          handlers.onDismiss,
+          cleanups,
+          built.modal ? undefined : built.panel
+        );
       }
       return true;
     },

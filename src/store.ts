@@ -127,9 +127,21 @@ export interface StoredOptIn {
   appId: string;
 }
 
+/**
+ * Set when `eligible` answered 403 for this device, so the next page loads of the
+ * day do not ask again (and do not log again): the server will not change its mind
+ * within the day, and a deleted device stays stored in the browser.
+ */
+export interface StoredInAppDenial {
+  deviceId: string;
+  /** Epoch ms of the 403. */
+  at: number;
+}
+
 export const CONFIG_KEY = 'config';
 export const DEVICE_KEY = 'device';
 export const OPT_IN_KEY = 'optin';
+export const INAPP_DENIED_KEY = 'inapp-denied';
 
 /** Profile fields the host set; sent now if registered, else at registration. */
 export interface StoredProfile {

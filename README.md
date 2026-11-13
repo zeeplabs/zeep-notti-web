@@ -67,8 +67,10 @@ no message.
 ```js
 // The SDK never opens a link itself; you decide what a button does.
 const subscription = Notti.InAppMessages.addClickListener(({ messageId, buttonId, action }) => {
+  // A `url` action reaches you already checked: https only. The SDK drops any other link before this point.
   if (action?.type === 'url') window.open(action.value, '_blank', 'noopener');
-  // action.type === 'deeplink': route it inside your app
+  // action.type === 'deeplink': route it inside your app, and match it against the routes you know
+  // rather than assigning it to `location`. The SDK only refuses javascript:, data:, vbscript: and file:.
 });
 subscription.remove(); // when you no longer want it
 
@@ -85,6 +87,18 @@ Notti.trackEvent('checkout_done');
 - Every message has a close control. `push_permission` buttons are not shown on the web.
 - Messages are not kept between page loads, and events are not queued across loads: an event that
   could not be sent when the page closed is dropped.
+- A page shows at most one blocking message (`center` or `full`) and one bar (`top` or `bottom`) per
+  page load, one at a time. A message that comes up while another is open, or whose slot was already used,
+  is dropped, not queued.
+- The decision is made once, at `init`: a visitor who accepts push during a visit (`requestPermission`)
+  receives In-App messages from the **next page load**, not in the same one.
+- Updating the SDK turns this on for every registered browser as soon as an author targets Web. There is
+  way to pause it at runtime yet. To keep it off on a page (a checkout, or inside an iframe) pass
+  `inApp: false` to `init`: nothing is fetched and nothing is shown, and Web Push is not affected. If the server answers 403 for a
+  browser (its device was deleted), the SDK stops asking for a day and logs one warning, not one per page.
+- When the page's Content Security Policy is strict (`style-src` without `unsafe-inline`), the overlay
+  styles itself with a constructable stylesheet. A browser without them (Safari 16.1 to 16.3) falls back
+  to a `<style>` element; if the page blocks it, the message is not shown and no impression is sent.
 
 ### Behaviour worth knowing
 

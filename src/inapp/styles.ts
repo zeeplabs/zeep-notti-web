@@ -1,15 +1,100 @@
 import type { InAppStyle } from './types';
 
+const DARK_TEXT = '#1A1A1A';
+const LIGHT_TEXT = '#FFFFFF';
+const LIGHT_SURFACE = '#FFFFFF';
+const DARK_SURFACE = '#1F1F1F';
+
+function channel(hex: string, start: number): number {
+  const value = parseInt(hex.slice(start, start + 2), 16) / 255;
+  return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+}
+
+/** WCAG relative luminance of a `#RRGGBB` colour (the parser only lets those through). */
+function luminance(hex: string): number {
+  return 0.2126 * channel(hex, 1) + 0.7152 * channel(hex, 3) + 0.0722 * channel(hex, 5);
+}
+
+function contrast(a: string, b: string): number {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [number, number];
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+/** Whichever of the two reads better against `against`. */
+function readableOn(against: string, light: string, dark: string): string {
+  return contrast(light, against) >= contrast(dark, against) ? light : dark;
+}
+
+/** WCAG 1.4.11: the least contrast a UI component needs against what surrounds it. */
+const MIN_COMPONENT_CONTRAST = 3;
+/** WCAG 1.4.3: the least contrast text needs against its background. */
+const MIN_TEXT_CONTRAST = 4.5;
+
 /**
- * Custom properties for the tokens the author set. An absent token adds
- * nothing, so the stylesheet default (and its dark variant) stays in force.
+ * The button colour for a panel the author coloured: the one of the two stock
+ * colours that stands out from the panel. With a button text colour already set,
+ * the one that reads best under it, as long as it still stands out from the panel.
+ */
+function buttonOn(surface: string, buttonText: string | undefined): string {
+  const best = readableOn(surface, LIGHT_TEXT, DARK_TEXT);
+  if (!buttonText) return best;
+  const other = best === LIGHT_TEXT ? DARK_TEXT : LIGHT_TEXT;
+  const preferred = readableOn(buttonText, best, other);
+  return contrast(preferred, surface) >= MIN_COMPONENT_CONTRAST ? preferred : best;
+}
+
+/**
+ * Custom properties for the tokens the author set. A token the author left out
+ * keeps the stylesheet default (and its dark variant), except when its partner
+ * was set: the defaults follow the visitor's colour scheme, not the author's
+ * colour, so a lone background or text colour could meet a default that cannot be
+ * read against it (dark text on a dark panel). The missing half is then derived
+ * from the one that was set, by contrast, and the author's own tokens stay as
+ * they are.
  */
 export function styleVariables(style: InAppStyle): Record<string, string> {
   const variables: Record<string, string> = {};
-  if (style.backgroundColor) variables['--ni-bg'] = style.backgroundColor;
-  if (style.textColor) variables['--ni-fg'] = style.textColor;
-  if (style.buttonColor) variables['--ni-btn-bg'] = style.buttonColor;
-  if (style.buttonTextColor) variables['--ni-btn-fg'] = style.buttonTextColor;
+
+  let surface = style.backgroundColor;
+  if (surface) {
+    variables['--ni-bg'] = surface;
+    if (!style.textColor) variables['--ni-fg'] = readableOn(surface, LIGHT_TEXT, DARK_TEXT);
+  }
+  if (style.textColor) {
+    variables['--ni-fg'] = style.textColor;
+    if (!surface) {
+      surface = readableOn(style.textColor, LIGHT_SURFACE, DARK_SURFACE);
+      variables['--ni-bg'] = surface;
+    }
+  }
+  if (surface) {
+    // The outline of the secondary button follows the panel it sits on.
+    variables['--ni-border'] =
+      readableOn(surface, LIGHT_TEXT, DARK_TEXT) === DARK_TEXT
+        ? 'rgba(0, 0, 0, 0.18)'
+        : 'rgba(255, 255, 255, 0.24)';
+  }
+
+  if (style.buttonColor) {
+    variables['--ni-btn-bg'] = style.buttonColor;
+    variables['--ni-btn-fg'] =
+      style.buttonTextColor ?? readableOn(style.buttonColor, LIGHT_TEXT, DARK_TEXT);
+  } else if (surface) {
+    // The button default also follows the visitor's colour scheme, so on a panel the
+    // author coloured it can melt into it (a dark button on a dark panel). Give it
+    // the colour that stands out from the panel, and keep the author's label colour
+    // unless it cannot be read on that button.
+    const button = buttonOn(surface, style.buttonTextColor);
+    variables['--ni-btn-bg'] = button;
+    variables['--ni-btn-fg'] =
+      style.buttonTextColor && contrast(style.buttonTextColor, button) >= MIN_TEXT_CONTRAST
+        ? style.buttonTextColor
+        : readableOn(button, LIGHT_TEXT, DARK_TEXT);
+  } else if (style.buttonTextColor) {
+    variables['--ni-btn-fg'] = style.buttonTextColor;
+    variables['--ni-btn-bg'] = readableOn(style.buttonTextColor, LIGHT_TEXT, DARK_TEXT);
+  }
+
   variables['--ni-align'] = style.textAlign;
   return variables;
 }
@@ -52,6 +137,7 @@ export const STYLESHEET = `
 @media (prefers-reduced-motion: reduce) { .ni { animation: none; } }
 
 .backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.5); pointer-events: auto; }
+.backdrop.shield { background: transparent; }
 
 .panel {
   position: absolute;

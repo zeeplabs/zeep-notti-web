@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDomView, preloadImage, type ViewEnv } from '../../src/inapp/render';
+import { STYLESHEET } from '../../src/inapp/styles';
 import type { DismissReason, ViewHandlers } from '../../src/inapp/session';
 import type { InAppButton, InAppMessage } from '../../src/inapp/types';
 
@@ -64,7 +65,13 @@ function key(name: string, options: KeyboardEventInit = {}, target: EventTarget 
 }
 
 function view(env: Partial<ViewEnv> = {}) {
-  return createDomView({ loadImage: () => Promise.resolve(true), language: 'en-US', ...env });
+  // jsdom does not lay out a Shadow root, so the real check would always say the styles failed.
+  return createDomView({
+    loadImage: () => Promise.resolve(true),
+    language: 'en-US',
+    stylesApplied: () => true,
+    ...env,
+  });
 }
 
 beforeEach(() => {
@@ -184,13 +191,54 @@ describe('layouts and semantics (WIAM-10, WIAM-11)', () => {
     expect(q('.title')).toBeNull();
   });
 
-  it('has a backdrop only on center', async () => {
+  it('has a dismissing backdrop only on center', async () => {
     const v = view();
     await v.show(message({ format: 'center' }), handlers().handlers);
     expect(q('.backdrop')).not.toBeNull();
+    expect(q('.shield')).toBeNull();
     v.close();
-    await v.show(message({ format: 'full' }), handlers().handlers);
-    expect(q('.backdrop')).toBeNull();
+    for (const format of ['top', 'bottom'] as const) {
+      await v.show(message({ format }), handlers().handlers);
+      expect(q('.backdrop'), format).toBeNull();
+      v.close();
+    }
+  });
+
+  describe('the margin of a full message (the page behind a modal is not reachable)', () => {
+    it('is covered by a transparent shield that never dismisses', async () => {
+      const h = handlers();
+      await view().show(message({ format: 'full', buttons: [button('b1')] }), h.handlers);
+      const shield = q('.shield');
+      expect(shield).not.toBeNull();
+      shield?.click();
+      expect(h.calls.dismisses).toEqual([]);
+      expect(h.calls.clicks).toEqual([]);
+    });
+
+    it('keeps focus where it was when the shield or the backdrop is pressed', async () => {
+      const v = view();
+      for (const format of ['full', 'center'] as const) {
+        await v.show(message({ format, buttons: [button('b1')] }), handlers().handlers);
+        const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+        q(format === 'full' ? '.shield' : '.backdrop')?.dispatchEvent(down);
+        expect(down.defaultPrevented, format).toBe(true);
+        v.close();
+      }
+    });
+
+    it('has the shield in the stylesheet as transparent', () => {
+      expect(STYLESHEET).toMatch(/\.backdrop\.shield \{[^}]*background: transparent/);
+    });
+  });
+
+  it.each(['top', 'bottom'] as const)('announces the text of a %s bar politely', async (format) => {
+    await view().show(message({ format }), handlers().handlers);
+    expect(q('.text')?.getAttribute('aria-live')).toBe('polite');
+  });
+
+  it.each(['center', 'full'] as const)('does not make the text of a %s dialog a live region', async (format) => {
+    await view().show(message({ format }), handlers().handlers);
+    expect(q('.text')?.getAttribute('aria-live')).toBeNull();
   });
 
   it('always has a close control, with the visitor language', async () => {
@@ -413,6 +461,91 @@ describe('auto dismiss (WIAM-06)', () => {
     expect(h.calls.dismisses).toEqual(['auto']);
   });
 
+  describe('on a bar the countdown also waits for the visitor', () => {
+    const hover = (type: 'mouseenter' | 'mouseleave') => q('.panel')?.dispatchEvent(new MouseEvent(type));
+    const focusIn = () => q('.panel')?.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+    const focusOut = (to: Node | null = null) =>
+      q('.panel')?.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: to }));
+
+    it('pauses while the pointer is over it and resumes with what was left', async () => {
+      vi.useFakeTimers();
+      const h = handlers();
+      await view().show(message({ format: 'top', dismissAfterSeconds: 10 }), h.handlers);
+
+      vi.advanceTimersByTime(4000);
+      hover('mouseenter');
+      vi.advanceTimersByTime(60_000);
+      expect(h.calls.dismisses).toEqual([]);
+
+      hover('mouseleave');
+      vi.advanceTimersByTime(5999);
+      expect(h.calls.dismisses).toEqual([]);
+      vi.advanceTimersByTime(1);
+      expect(h.calls.dismisses).toEqual(['auto']);
+    });
+
+    it('pauses while focus is inside it, and moving between its controls does not resume it', async () => {
+      vi.useFakeTimers();
+      const h = handlers();
+      await view().show(
+        message({ format: 'bottom', dismissAfterSeconds: 10, buttons: [button('b1'), button('b2')] }),
+        h.handlers
+      );
+      const second = qa('.btn')[1] as HTMLElement;
+
+      vi.advanceTimersByTime(3000);
+      focusIn();
+      focusOut(second);
+      vi.advanceTimersByTime(60_000);
+      expect(h.calls.dismisses).toEqual([]);
+
+      focusOut(null);
+      vi.advanceTimersByTime(6999);
+      expect(h.calls.dismisses).toEqual([]);
+      vi.advanceTimersByTime(1);
+      expect(h.calls.dismisses).toEqual(['auto']);
+    });
+
+    it('stays paused until both the pointer and the focus have left', async () => {
+      vi.useFakeTimers();
+      const h = handlers();
+      await view().show(message({ format: 'top', dismissAfterSeconds: 5 }), h.handlers);
+
+      hover('mouseenter');
+      focusIn();
+      hover('mouseleave');
+      vi.advanceTimersByTime(60_000);
+      expect(h.calls.dismisses).toEqual([]);
+
+      focusOut(null);
+      vi.advanceTimersByTime(5000);
+      expect(h.calls.dismisses).toEqual(['auto']);
+    });
+
+    it('does not pause a dialog, whose first control takes focus when it opens', async () => {
+      vi.useFakeTimers();
+      const h = handlers();
+      await view().show(message({ format: 'center', dismissAfterSeconds: 5 }), h.handlers);
+      q('.panel')?.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+      q('.panel')?.dispatchEvent(new MouseEvent('mouseenter'));
+      vi.advanceTimersByTime(5000);
+      expect(h.calls.dismisses).toEqual(['auto']);
+    });
+
+    it('stops listening for the pointer after close', async () => {
+      vi.useFakeTimers();
+      const h = handlers();
+      const v = view();
+      await v.show(message({ format: 'top', dismissAfterSeconds: 5 }), h.handlers);
+      const panel = q('.panel');
+      v.close();
+      panel?.dispatchEvent(new MouseEvent('mouseenter'));
+      panel?.dispatchEvent(new MouseEvent('mouseleave'));
+      vi.advanceTimersByTime(60_000);
+      expect(h.calls.dismisses).toEqual([]);
+    });
+  });
+
   it('has no timer without dismiss_after_seconds', async () => {
     vi.useFakeTimers();
     const h = handlers();
@@ -449,6 +582,86 @@ describe('visibility wait', () => {
     setVisibility('visible');
     expect(await shown).toBe(false);
     expect(host()).toBeNull();
+  });
+});
+
+describe('how the styles get in (strict CSP)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete (ShadowRoot.prototype as unknown as Record<string, unknown>)['adoptedStyleSheets'];
+  });
+
+  /** What every current browser has and jsdom does not: constructable stylesheets. */
+  function stubConstructableStylesheets(): { sheets: Array<{ css: string }> } {
+    const made: Array<{ css: string }> = [];
+    class FakeSheet {
+      css = '';
+      replaceSync(css: string): void {
+        this.css = css;
+        made.push(this);
+      }
+    }
+    vi.stubGlobal('CSSStyleSheet', FakeSheet);
+    Object.defineProperty(ShadowRoot.prototype, 'adoptedStyleSheets', {
+      configurable: true,
+      writable: true,
+      value: [],
+    });
+    return { sheets: made };
+  }
+
+  it('adopts a constructable stylesheet and adds no <style> element when the browser has them', async () => {
+    const { sheets } = stubConstructableStylesheets();
+    const stylesApplied = vi.fn(() => false);
+    const shown = await view({ stylesApplied }).show(message(), handlers().handlers);
+
+    expect(shown).toBe(true);
+    expect(sheets).toHaveLength(1);
+    expect(sheets[0]?.css).toContain('.panel');
+    expect((root() as unknown as { adoptedStyleSheets: unknown[] }).adoptedStyleSheets).toEqual(sheets);
+    expect(q('style')).toBeNull();
+    // Adopted sheets cannot be refused by `style-src`, so nothing needs checking.
+    expect(stylesApplied).not.toHaveBeenCalled();
+  });
+
+  it('falls back to a <style> element when adopting fails', async () => {
+    class BrokenSheet {
+      replaceSync(): void {
+        throw new Error('not allowed');
+      }
+    }
+    vi.stubGlobal('CSSStyleSheet', BrokenSheet);
+    Object.defineProperty(ShadowRoot.prototype, 'adoptedStyleSheets', {
+      configurable: true,
+      writable: true,
+      value: [],
+    });
+    expect(await view().show(message(), handlers().handlers)).toBe(true);
+    expect(q('style')?.textContent).toContain('.panel');
+  });
+
+  it('shows the message when the <style> fallback took effect', async () => {
+    const stylesApplied = vi.fn(() => true);
+    expect(await view({ stylesApplied }).show(message(), handlers().handlers)).toBe(true);
+    expect(stylesApplied).toHaveBeenCalledWith(q('.ni'));
+    expect(host()).not.toBeNull();
+  });
+
+  it('shows nothing, and answers false so no impression is sent, when the <style> fallback was refused', async () => {
+    const h = handlers();
+    const stylesApplied = vi.fn(() => false);
+    const shown = await view({ stylesApplied }).show(message({ buttons: [button('b1')] }), h.handlers);
+
+    expect(shown).toBe(false);
+    expect(host()).toBeNull();
+    expect(document.body.textContent).toBe('');
+  });
+
+  it('can show the next message after one was refused', async () => {
+    const v = view({ stylesApplied: vi.fn().mockReturnValueOnce(false).mockReturnValue(true) });
+    expect(await v.show(message({ id: 'm1' }), handlers().handlers)).toBe(false);
+    expect(await v.show(message({ id: 'm2' }), handlers().handlers)).toBe(true);
+    expect(host()).not.toBeNull();
   });
 });
 

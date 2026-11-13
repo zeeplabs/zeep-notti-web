@@ -131,6 +131,55 @@ describe('parseEligibleResponse', () => {
     });
   });
 
+  describe('link actions the SDK hands to the integrator', () => {
+    const button = (action: unknown) => ({ id: 'b1', label: 'Go', action });
+    const kept = (action: unknown) => parse({ buttons: [button(action)] })[0]?.buttons.length;
+
+    it('requires https for a url action', () => {
+      expect(kept({ type: 'url', value: 'https://example.com/a' })).toBe(1);
+      for (const value of [
+        'http://example.com',
+        'javascript:alert(1)',
+        'JaVaScRiPt:alert(1)',
+        ' \tjavascript:alert(1)',
+        'data:text/html,<script>alert(1)</script>',
+        '//example.com',
+        'example.com',
+      ]) {
+        expect(kept({ type: 'url', value }), value).toBe(0);
+      }
+    });
+
+    it('refuses script-running schemes in a deeplink, however they are written', () => {
+      for (const value of [
+        'javascript:alert(1)',
+        'JaVaScRiPt:alert(1)',
+        '  javascript:alert(1)',
+        '\n\tjavascript:alert(1)',
+        'java\nscript:alert(1)',
+        'data:text/html;base64,AAAA',
+        'vbscript:msgbox(1)',
+        'file:///etc/passwd',
+      ]) {
+        expect(kept({ type: 'deeplink', value }), JSON.stringify(value)).toBe(0);
+      }
+    });
+
+    it('keeps an app deeplink and a custom scheme', () => {
+      expect(kept({ type: 'deeplink', value: 'exampleapp://offers/42' })).toBe(1);
+      expect(kept({ type: 'deeplink', value: '/account/orders' })).toBe(1);
+    });
+
+    it('drops an unsafe image action but keeps the image', () => {
+      const message = parse({
+        image_url: 'https://cdn.example.com/a.png',
+        image_action: { type: 'url', value: 'javascript:alert(1)' },
+      })[0];
+      expect(message?.imageUrl).toBe('https://cdn.example.com/a.png');
+      expect(message?.imageAction).toBeUndefined();
+    });
+  });
+
   describe('style', () => {
     it('keeps valid tokens', () => {
       const [message] = parse({
