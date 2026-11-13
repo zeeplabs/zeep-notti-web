@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 (unreleased)
+## 0.2.0 (2026-11-13)
 
 - In-App messages on the web. A browser with a Web Push subscription fetches the messages targeted at Web once per page load and shows the first one that starts with the session, as a Shadow DOM overlay with the four layouts (`center`, `top`, `bottom`, `full`), the style tokens, a close control and the auto-dismiss timer. It reports `impression`, `click` and `dismiss` like the mobile SDKs. A visitor with no registered browser makes no request and sees nothing; `init` never waits for it and its result does not change.
 - `Notti.InAppMessages.addClickListener(handler)` (returns `{ remove() }`) receives `{ messageId, buttonId, action }` after a button or the image was pressed. The SDK opens nothing itself.
@@ -12,7 +12,7 @@
 - A text or background colour set alone no longer meets a default that cannot be read against it: the missing half is derived from the one the author set, by contrast (the same for the button and its text). When the author colours the panel but not the button, the button gets the stock colour that stands out from the panel (contrast of at least 3, so a dark button never melts into a dark panel), and its label stays readable.
 - `click` and `dismiss` are sent at once, not behind the `impression`, so a listener that navigates away cannot lose the click. If a browser refuses `keepalive` on the events request (it needs a CORS preflight), the event is repeated once without it. A 401 or 403 from the events route ends In-App for the page load. A 403 from `eligible` is remembered for a day per browser (no request and no console warning on the next loads).
 - `full` covers the margin around its panel with a transparent shield, so the page behind it is not clickable. `top` and `bottom` announce their text politely and their auto-dismiss waits while the pointer is over the bar or focus is inside it. If a strict `style-src` blocks the `<style>` fallback (Safari 16.1 to 16.3, which has no constructable stylesheets), the message is not shown and no impression is sent.
-- The Notti server must be a version that sends CORS headers on the In-App routes (this release's server). Update the server first, then the SDK.
+- The Notti server must be v0.31.0 or later, the first version that sends CORS headers on the In-App routes. Update the server first, then the SDK.
 
 ### Upgrading to 0.2.0
 
