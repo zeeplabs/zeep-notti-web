@@ -27,10 +27,10 @@ const device: StoredDevice = {
   publicKey: 'pk',
 };
 
-function wire(id: string, trigger: unknown = { type: 'session_start' }): unknown {
+function wire(id: string, trigger: unknown = { type: 'session_start' }, format = 'center'): unknown {
   return {
     id,
-    format: 'center',
+    format,
     title: `title ${id}`,
     body: 'body',
     trigger,
@@ -377,8 +377,8 @@ describe('trackEvent (WIAM-07)', () => {
     const s = setup(
       eligible(
         wire('start'),
-        wire('buy-1', { type: 'event', name: 'buy' }),
-        wire('buy-2', { type: 'event', name: 'buy' })
+        wire('buy-1', { type: 'event', name: 'buy' }, 'top'),
+        wire('buy-2', { type: 'event', name: 'buy' }, 'top')
       )
     );
     await s.start();
@@ -388,15 +388,78 @@ describe('trackEvent (WIAM-07)', () => {
     await settle();
     expect(s.view.shown).toEqual(['start', 'buy-1']);
 
+    // The page already had its bar: the second one waits for another page load.
     s.view.handlers?.onDismiss('close_button');
     s.session.trackEvent('buy');
     await settle();
-    expect(s.view.shown).toEqual(['start', 'buy-1', 'buy-2']);
+    expect(s.view.shown).toEqual(['start', 'buy-1']);
+  });
 
-    s.view.handlers?.onDismiss('close_button');
-    s.session.trackEvent('buy');
-    await settle();
-    expect(s.view.shown).toHaveLength(3);
+  describe('one blocking message and one bar per page load', () => {
+    it('shows no second blocking message after the first one closed', async () => {
+      const s = setup(eligible(wire('start'), wire('buy', { type: 'event', name: 'buy' }, 'full')));
+      await s.start();
+      s.view.handlers?.onDismiss('close_button');
+      await settle();
+
+      s.session.trackEvent('buy');
+      await settle();
+
+      expect(s.view.shown).toEqual(['start']);
+    });
+
+    it('lets a bar appear after a blocking message, and then no second bar', async () => {
+      const s = setup(
+        eligible(
+          wire('start'),
+          wire('bar-1', { type: 'event', name: 'a' }, 'top'),
+          wire('bar-2', { type: 'event', name: 'b' }, 'bottom')
+        )
+      );
+      await s.start();
+      s.view.handlers?.onDismiss('close_button');
+      await settle();
+
+      s.session.trackEvent('a');
+      await settle();
+      s.view.handlers?.onDismiss('close_button');
+      s.session.trackEvent('b');
+      await settle();
+
+      expect(s.view.shown).toEqual(['start', 'bar-1']);
+    });
+
+    it('skips a message of a used slot and shows the next one of the same event', async () => {
+      const s = setup(
+        eligible(
+          wire('start'),
+          wire('big', { type: 'event', name: 'buy' }, 'full'),
+          wire('bar', { type: 'event', name: 'buy' }, 'top')
+        )
+      );
+      await s.start();
+      s.view.handlers?.onDismiss('close_button');
+      await settle();
+
+      s.session.trackEvent('buy');
+      await settle();
+
+      expect(s.view.shown).toEqual(['start', 'bar']);
+    });
+
+    it('does not spend the slot on a message that failed to appear', async () => {
+      const s = setup(
+        eligible(wire('broken'), wire('buy', { type: 'event', name: 'buy' }))
+      );
+      s.view.failing.add('broken');
+      await s.start();
+      await settle();
+
+      s.session.trackEvent('buy');
+      await settle();
+
+      expect(s.view.shown).toEqual(['buy']);
+    });
   });
 
   it('matches the name exactly and never sends it to the server', async () => {
@@ -539,7 +602,7 @@ describe('errors and rate limits (WIAM-09)', () => {
   describe('an answer from /events that says the server does not accept this browser', () => {
     const eventsFail = (status: number) => (req: RecordedRequest) =>
       req.url.endsWith('/eligible')
-        ? jsonResponse(200, { messages: [wire('m1'), onEvent('buy')] })
+        ? jsonResponse(200, { messages: [wire('m1'), wire('ev-buy', { type: 'event', name: 'buy' }, 'top')] })
         : failing(status)();
 
     it.each([401, 403])('stops the session on a %i, so later events and messages stay quiet', async (status) => {

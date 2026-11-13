@@ -87,6 +87,9 @@ Notti.trackEvent('checkout_done');
 - Every message has a close control. `push_permission` buttons are not shown on the web.
 - Messages are not kept between page loads, and events are not queued across loads: an event that
   could not be sent when the page closed is dropped.
+- A page shows at most one blocking message (`center` or `full`) and one bar (`top` or `bottom`) per
+  page load, one at a time. A message that comes up while another is open, or whose slot was already used,
+  is dropped, not queued.
 - The decision is made once, at `init`: a visitor who accepts push during a visit (`requestPermission`)
   receives In-App messages from the **next page load**, not in the same one.
 - Updating the SDK turns this on for every registered browser as soon as an author targets Web. There is

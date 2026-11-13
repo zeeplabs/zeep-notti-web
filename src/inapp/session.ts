@@ -65,6 +65,10 @@ interface Visible {
   done: boolean;
 }
 
+function slotOf(message: InAppMessage): 'blocking' | 'bar' {
+  return message.format === 'top' || message.format === 'bottom' ? 'bar' : 'blocking';
+}
+
 export function createInAppSession(deps: SessionDeps): InAppSession {
   const warn = deps.warn ?? ((message: string) => console.warn(message));
   const makeEventId = deps.newEventId ?? newEventId;
@@ -77,6 +81,10 @@ export function createInAppSession(deps: SessionDeps): InAppSession {
   let ready = false;
   let held: InAppMessage[] = [];
   const shown = new Set<string>();
+  // One blocking message (center, full) and one bar (top, bottom) per page load, like the
+  // mobile SDKs' one modal per session: a page that fires several events must not turn into
+  // a stack of overlays. Only a message that actually appeared uses its slot.
+  const slotsUsed = new Set<'blocking' | 'bar'>();
   const remembered: string[] = [];
   let visible: Visible | null = null;
   let context: { runtime: Runtime; state: SdkState; device: StoredDevice } | null = null;
@@ -151,6 +159,7 @@ export function createInAppSession(deps: SessionDeps): InAppSession {
     }
     if (!ok) return false;
     visible = { message, done: false };
+    slotsUsed.add(slotOf(message));
     report(message, { type: 'impression' });
     return true;
   }
@@ -160,7 +169,7 @@ export function createInAppSession(deps: SessionDeps): InAppSession {
     if (busy || stopped) return false;
     busy = true;
     for (const message of candidates) {
-      if (shown.has(message.id)) continue;
+      if (shown.has(message.id) || slotsUsed.has(slotOf(message))) continue;
       if (await present(message)) return true;
       if (stopped) break;
     }
