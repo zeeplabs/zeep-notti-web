@@ -67,8 +67,10 @@ no message.
 ```js
 // The SDK never opens a link itself; you decide what a button does.
 const subscription = Notti.InAppMessages.addClickListener(({ messageId, buttonId, action }) => {
+  // A `url` action reaches you already checked: https only. The SDK drops any other link before this point.
   if (action?.type === 'url') window.open(action.value, '_blank', 'noopener');
-  // action.type === 'deeplink': route it inside your app
+  // action.type === 'deeplink': route it inside your app, and match it against the routes you know
+  // rather than assigning it to `location`. The SDK only refuses javascript:, data:, vbscript: and file:.
 });
 subscription.remove(); // when you no longer want it
 
