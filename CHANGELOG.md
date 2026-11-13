@@ -6,7 +6,17 @@
 - `Notti.InAppMessages.addClickListener(handler)` (returns `{ remove() }`) receives `{ messageId, buttonId, action }` after a button or the image was pressed. The SDK opens nothing itself.
 - `Notti.trackEvent(name)` shows the oldest held message triggered by that event name, when no message is visible. Names tracked before `init` finishes are remembered (up to 32).
 - A message whose image cannot load is not shown and reports nothing. `push_permission` buttons are not shown on the web.
+- A link reaches the click listener only if the SDK has checked it: a `url` action must be https, and a `deeplink` must not be `javascript:`, `data:`, `vbscript:` or `file:`. A button or image action that fails is dropped.
+- A text or background colour set alone no longer meets a default that cannot be read against it: the missing half is derived from the one the author set, by contrast (the same for the button and its text).
+- `click` and `dismiss` are sent at once, not behind the `impression`, so a listener that navigates away cannot lose the click. If a browser refuses `keepalive` on the events request (it needs a CORS preflight), the event is repeated once without it. A 401 or 403 from the events route ends In-App for the page load. A 403 from `eligible` is remembered for a day per browser (no request and no console warning on the next loads).
+- `full` covers the margin around its panel with a transparent shield, so the page behind it is not clickable. `top` and `bottom` announce their text politely and their auto-dismiss waits while the pointer is over the bar or focus is inside it. If a strict `style-src` blocks the `<style>` fallback (Safari 16.1 to 16.3, which has no constructable stylesheets), the message is not shown and no impression is sent.
 - The Notti server must be a version that sends CORS headers on the In-App routes (this release's server). Update the server first, then the SDK.
+
+### Upgrading to 0.2.0
+
+- **It switches In-App on by itself.** For a site whose visitors have a registered browser, updating to 0.2.0 starts the fetch at every page load, and a message shows as soon as an author targets Web. There is no option to turn it off yet; a way to pause or disable it (for a checkout page, or an embedded iframe) is a candidate follow-up and a product decision. Until then, hold the update on pages that must never show an overlay.
+- **A visitor who accepts push during a visit gets In-App messages from the next page load**, not in the same one: the session decides once, at `init`, whether a registered browser exists.
+- **Server first, then reload the dashboard.** Update the Notti server, then reload every open dashboard tab before the SDK is released: an editor opened before the server update can save `platforms: []` (every platform, Web included) over a message that the server migration had pinned to iOS and Android.
 
 ## 0.1.2 (2026-11-12)
 

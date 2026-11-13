@@ -87,6 +87,15 @@ Notti.trackEvent('checkout_done');
 - Every message has a close control. `push_permission` buttons are not shown on the web.
 - Messages are not kept between page loads, and events are not queued across loads: an event that
   could not be sent when the page closed is dropped.
+- The decision is made once, at `init`: a visitor who accepts push during a visit (`requestPermission`)
+  receives In-App messages from the **next page load**, not in the same one.
+- Updating the SDK turns this on for every registered browser as soon as an author targets Web. There is
+  no switch to pause or disable it yet (for a checkout page, or inside an iframe); if you need one, ask
+  for it, it is planned as an addition and does not change what exists. If the server answers 403 for a
+  browser (its device was deleted), the SDK stops asking for a day and logs one warning, not one per page.
+- When the page's Content Security Policy is strict (`style-src` without `unsafe-inline`), the overlay
+  styles itself with a constructable stylesheet. A browser without them (Safari 16.1 to 16.3) falls back
+  to a `<style>` element; if the page blocks it, the message is not shown and no impression is sent.
 
 ### Behaviour worth knowing
 
