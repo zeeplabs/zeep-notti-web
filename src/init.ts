@@ -13,6 +13,12 @@ export interface InitOptions {
   host?: string;
   /** Path the service worker file is served from. Defaults to /notti-sw.js. */
   serviceWorkerPath?: string;
+  /**
+   * Set it to `false` to keep In-App messages off on this page (a checkout, an embedded
+   * iframe): nothing is fetched and nothing is shown. Anything else, or leaving it out,
+   * keeps them on. Web Push is not affected.
+   */
+  inApp?: boolean;
 }
 
 export const DEFAULT_SERVICE_WORKER_PATH = '/notti-sw.js';
@@ -69,7 +75,7 @@ export async function init(
   }
 
   await syncSubscription(state, runtime);
-  startInApp(state, runtime);
+  if (options.inApp !== false) startInApp(state, runtime);
   return { supported: true };
 }
 

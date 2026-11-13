@@ -5,6 +5,7 @@
 - In-App messages on the web. A browser with a Web Push subscription fetches the messages targeted at Web once per page load and shows the first one that starts with the session, as a Shadow DOM overlay with the four layouts (`center`, `top`, `bottom`, `full`), the style tokens, a close control and the auto-dismiss timer. It reports `impression`, `click` and `dismiss` like the mobile SDKs. A visitor with no registered browser makes no request and sees nothing; `init` never waits for it and its result does not change.
 - `Notti.InAppMessages.addClickListener(handler)` (returns `{ remove() }`) receives `{ messageId, buttonId, action }` after a button or the image was pressed. The SDK opens nothing itself.
 - `Notti.trackEvent(name)` shows the oldest held message triggered by that event name, when no message is visible. Names tracked before `init` finishes are remembered (up to 32).
+- `init({ inApp: false })` keeps In-App off for that page: no request, no overlay. Any other value, or leaving it out, keeps it on. Web Push is not affected.
 - A page shows at most one blocking message (`center` or `full`) and one bar (`top` or `bottom`) per page load, one at a time, like the mobile SDKs' one modal per session. A message that arrives while another is open, or whose slot was already used, is dropped, not queued. A message that failed to appear does not use its slot.
 - A message whose image cannot load is not shown and reports nothing. `push_permission` buttons are not shown on the web.
 - A link reaches the click listener only if the SDK has checked it: a `url` action must be https, and a `deeplink` must not be `javascript:`, `data:`, `vbscript:` or `file:`. A button or image action that fails is dropped.
@@ -15,7 +16,7 @@
 
 ### Upgrading to 0.2.0
 
-- **It switches In-App on by itself.** For a site whose visitors have a registered browser, updating to 0.2.0 starts the fetch at every page load, and a message shows as soon as an author targets Web. There is no option to turn it off yet; a way to pause or disable it (for a checkout page, or an embedded iframe) is a candidate follow-up and a product decision. Until then, hold the update on pages that must never show an overlay.
+- **It switches In-App on by itself.** For a site whose visitors have a registered browser, updating to 0.2.0 starts the fetch at every page load, and a message shows as soon as an author targets Web. To keep it off on a page that must never show an overlay (a checkout, an embedded iframe), pass `inApp: false` to `init`: nothing is fetched and nothing is shown. A pause or resume at runtime is a candidate follow-up.
 - **A visitor who accepts push during a visit gets In-App messages from the next page load**, not in the same one: the session decides once, at `init`, whether a registered browser exists.
 - **Server first, then reload the dashboard.** Update the Notti server, then reload every open dashboard tab before the SDK is released: an editor opened before the server update can save `platforms: []` (every platform, Web included) over a message that the server migration had pinned to iOS and Android.
 

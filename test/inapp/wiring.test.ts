@@ -26,6 +26,38 @@ describe('init starts In-App (WIAM-04)', () => {
     );
   });
 
+  it('does not start when the page turns In-App off with inApp: false', async () => {
+    const start = vi.fn(() => Promise.resolve());
+    const fake = withInApp({ start });
+    await expect(init({ ...opts, inApp: false }, fake.runtime)).resolves.toEqual({ supported: true });
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it.each([true, undefined, null, 0, 'false'])('keeps In-App on for inApp: %s', async (value) => {
+    const start = vi.fn(() => Promise.resolve());
+    const fake = withInApp({ start });
+    await init({ ...opts, inApp: value as unknown as boolean }, fake.runtime);
+    expect(start).toHaveBeenCalledTimes(1);
+  });
+
+  it('makes no In-App request with inApp: false even when a device is stored', async () => {
+    const fake = fakeRuntime(config);
+    await fake.runtime.store.set('device', {
+      id: 'dev-1',
+      appId: 'app_123',
+      token: 'https://push.example/abc',
+    });
+    fake.runtime.inApp = createInAppSession({
+      view: { show: () => Promise.resolve(true), close: () => undefined },
+      onClick: () => undefined,
+    });
+
+    await init({ ...opts, inApp: false }, fake.runtime);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(fake.requests.some((r) => r.url.includes('/in-app-messages'))).toBe(false);
+  });
+
   it('does not wait for the session', async () => {
     const fake = withInApp({ start: () => new Promise<void>(() => undefined) });
     await expect(init(opts, fake.runtime)).resolves.toEqual({ supported: true });

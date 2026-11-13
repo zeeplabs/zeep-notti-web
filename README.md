@@ -93,8 +93,8 @@ Notti.trackEvent('checkout_done');
 - The decision is made once, at `init`: a visitor who accepts push during a visit (`requestPermission`)
   receives In-App messages from the **next page load**, not in the same one.
 - Updating the SDK turns this on for every registered browser as soon as an author targets Web. There is
-  no switch to pause or disable it yet (for a checkout page, or inside an iframe); if you need one, ask
-  for it, it is planned as an addition and does not change what exists. If the server answers 403 for a
+  way to pause it at runtime yet. To keep it off on a page (a checkout, or inside an iframe) pass
+  `inApp: false` to `init`: nothing is fetched and nothing is shown, and Web Push is not affected. If the server answers 403 for a
   browser (its device was deleted), the SDK stops asking for a day and logs one warning, not one per page.
 - When the page's Content Security Policy is strict (`style-src` without `unsafe-inline`), the overlay
   styles itself with a constructable stylesheet. A browser without them (Safari 16.1 to 16.3) falls back
