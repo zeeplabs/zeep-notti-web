@@ -102,6 +102,12 @@ Notti.trackEvent('checkout_done');
 
 ### Behaviour worth knowing
 
+- Besides `sdk_name`, `sdk_version` and the permission status, the SDK reports three facts about the browser, in the request that follows the registration, and again at a later `init` only if one changed. They let you build segments by OS, language and time zone, as with the mobile SDKs. This is everything it collects:
+  - `device_os`: OS family and major version when the browser reveals it (`macOS 15`, `Windows 11`, `Android 14`, `iOS 18`), or the family alone (`Linux`, `ChromeOS`, `macOS`, `Windows`). It reads `navigator.userAgentData` (the version through `getHighEntropyValues('platformVersion')`, which needs no prompt) and, in browsers without it (Safari, Firefox), a minimal match of the OS name in `navigator.userAgent`.
+  - `language`: the primary subtag of `navigator.language`, lower case (`pt-BR` is sent as `pt`), as the Android and iOS SDKs do.
+  - `timezone_id`: the IANA time zone (`America/Sao_Paulo`).
+
+  The SDK does not send the `User-Agent`, any minor or patch version, the browser name or version, or any other signal that identifies a browser (screen, fonts, canvas, memory). A value it cannot determine is omitted. Mention this in your privacy notice if it lists the data your push provider receives.
 - Notti counts a browser as active (monthly active users, and which devices stay inside an App's plan limit) from the last time it heard from it. At `init`, a registered browser that Notti has not heard from for a day sends one small request (its permission status) in the background, about once a day, so a returning visitor stays active. Tabs open at the same time send it once between them. It never delays or fails `init`; a failure that could succeed later is tried again at the next one, and an answer a retry cannot change (a deleted device gets a 403) waits until the next day.
 - The service worker always shows a notification, even for a payload it cannot read, because a browser
   may revoke permission from a site that receives a push and shows nothing.

@@ -1,4 +1,9 @@
 import { createDevice, patchDevice, sdkFields } from './devices';
+import {
+  collectEnvironment,
+  environmentChanged,
+  type Environment,
+} from './environment';
 import { nowOf, type Runtime, type SdkState } from './runtime';
 import {
   flushProfile,
@@ -52,9 +57,14 @@ export async function ensureRegistered(
     stored.publicKey === state.publicKey
   ) {
     // Nothing to register, but an sdk PATCH or a profile change that failed
-    // earlier is still owed to the server.
-    if (stored.sdkSynced === false) {
-      await reportSdkFields(runtime, state.config, stored);
+    // earlier is still owed to the server, and so is an OS, language or time
+    // zone that changed since the last one it acknowledged.
+    const environment = await collectEnvironment(runtime.env);
+    if (
+      stored.sdkSynced === false ||
+      environmentChanged(stored.reported, environment)
+    ) {
+      await reportSdkFields(runtime, state.config, stored, environment);
     }
     await flushProfile(runtime, state.config, stored);
     return stored.id;
@@ -89,13 +99,19 @@ export async function ensureRegistered(
   return id;
 }
 
-/** Sends sdk_name and sdk_version; marks the stored Device synced on success. */
+/**
+ * Sends sdk_name, sdk_version and the browser's OS, language and time zone;
+ * marks the stored Device synced on success. Never throws.
+ */
 async function reportSdkFields(
   runtime: Runtime,
   config: ApiConfig,
-  device: StoredDevice
+  device: StoredDevice,
+  collected?: Environment
 ): Promise<void> {
   try {
+    const environment = collected ?? (await collectEnvironment(runtime.env));
+    const fields = await sdkFields(runtime.env, environment);
     await withRetry(
       () =>
         patchDevice(
@@ -103,7 +119,7 @@ async function reportSdkFields(
           config,
           device.id,
           device.endpoint,
-          sdkFields()
+          fields
         ),
       runtime.sleep
     );
@@ -111,6 +127,8 @@ async function reportSdkFields(
     await runtime.store.set(DEVICE_KEY, {
       ...device,
       sdkSynced: true,
+      // Fields the browser could not tell stay as they were reported.
+      reported: { ...device.reported, ...environment },
       seenAt: nowOf(runtime),
     });
   } catch {

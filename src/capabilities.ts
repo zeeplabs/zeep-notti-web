@@ -26,6 +26,18 @@ export interface BrowserEnv {
     maxTouchPoints?: number;
     standalone?: boolean;
     serviceWorker?: unknown;
+    language?: string;
+    userAgentData?: {
+      platform?: string;
+      getHighEntropyValues?: (
+        hints: string[]
+      ) => Promise<{ platformVersion?: string }>;
+    };
+  };
+  Intl?: {
+    DateTimeFormat: () => {
+      resolvedOptions: () => { timeZone?: string };
+    };
   };
   PushManager?: unknown;
   Notification?: unknown;
