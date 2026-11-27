@@ -116,6 +116,16 @@ export interface StoredDevice {
    */
   sdkSynced?: boolean;
   /**
+   * The device_os, language and timezone_id the server last acknowledged, so a
+   * change (an OS upgrade, another language or time zone) is sent again. A
+   * record written before 0.3.0 has none.
+   */
+  reported?: {
+    device_os?: string;
+    language?: string;
+    timezone_id?: string;
+  };
+  /**
    * When the server last saw this browser (epoch ms): the registration, the
    * sdk PATCH or a heartbeat. A record written by 0.1.0 or 0.1.1 has none.
    */

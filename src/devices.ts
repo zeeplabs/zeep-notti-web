@@ -1,4 +1,6 @@
 import { request, type ApiConfig, type Fetcher } from './api';
+import type { BrowserEnv } from './capabilities';
+import { collectEnvironment, type Environment } from './environment';
 import { SDK_NAME, SDK_VERSION } from './version';
 
 export interface WebKeys {
@@ -53,11 +55,19 @@ export async function patchDevice(
   );
 }
 
-/** What the SDK reports about itself after every registration. */
-export function sdkFields(): Record<string, unknown> {
+/**
+ * What the SDK reports about itself and the browser after every registration.
+ * `environment` is what `collectEnvironment` found, so the caller can also
+ * remember what was reported. Never rejects.
+ */
+export async function sdkFields(
+  env: BrowserEnv,
+  environment?: Environment
+): Promise<Record<string, unknown>> {
   return {
     sdk_name: SDK_NAME,
     sdk_version: SDK_VERSION,
     permission_status: 'granted',
+    ...(environment ?? (await collectEnvironment(env))),
   };
 }

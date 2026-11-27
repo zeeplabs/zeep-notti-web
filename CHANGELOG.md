@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- The SDK now tells Notti the browser's operating system, language and time zone, as the Android and iOS SDKs already do, so segments can use them. They go in the same request that follows the registration (the one with `sdk_name` and `sdk_version`), and are sent again at the next `init` when one of them changed. The daily activity request is unchanged. Exactly three values are collected, and nothing else:
+  - `device_os`: the OS family plus its major version when the browser reveals it, for example `macOS 15`, `Windows 11`, `Android 14`, `iOS 18`; the family alone (`Linux`, `ChromeOS`, `macOS`, `Windows`) when it does not. Never a minor or patch version.
+  - `language`: the primary language subtag from `navigator.language`, lower case: `pt-BR` is sent as `pt`, the same as the mobile SDKs.
+  - `timezone_id`: the IANA time zone, for example `America/Sao_Paulo`.
+- The full `User-Agent` is never sent, and neither is any other fingerprinting signal (screen size, fonts, canvas, memory). A value the browser cannot tell is left out, never sent empty. The server needs no change. A failure to read them or to send them never fails `init` or the registration; it is tried again at the next `init`.
+- Browsers registered by an earlier version send the three values once, at their next `init`.
+
 ## 0.2.0 (2026-11-13)
 
 - In-App messages on the web. A browser with a Web Push subscription fetches the messages targeted at Web once per page load and shows the first one that starts with the session, as a Shadow DOM overlay with the four layouts (`center`, `top`, `bottom`, `full`), the style tokens, a close control and the auto-dismiss timer. It reports `impression`, `click` and `dismiss` like the mobile SDKs. A visitor with no registered browser makes no request and sees nothing; `init` never waits for it and its result does not change.
