@@ -1,13 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 (2026-11-27)
 
-- The SDK now tells Notti the browser's operating system, language and time zone, as the Android and iOS SDKs already do, so segments can use them. They go in the same request that follows the registration (the one with `sdk_name` and `sdk_version`), and are sent again at the next `init` when one of them changed. The daily activity request is unchanged. Exactly three values are collected, and nothing else:
+- The SDK now tells Notti the browser's operating system, language and time zone, as the Android and iOS SDKs already do, so they can be used in segment rules (through the API; the dashboard catalog lists only some of them, and its Portuguese option `pt-BR` matches nothing, because no SDK sends a region). They go in the same request that follows the registration (the one with `sdk_name` and `sdk_version`), and are sent again at the next `init` when one of them changed. The daily activity request is unchanged. Exactly three values are collected, and nothing else:
   - `device_os`: the OS family plus its major version when the browser reveals it, for example `macOS 15`, `Windows 11`, `Android 14`, `iOS 18`; the family alone (`Linux`, `ChromeOS`, `macOS`, `Windows`) when it does not. Never a minor or patch version.
   - `language`: the primary language subtag from `navigator.language`, lower case: `pt-BR` is sent as `pt`, the same as the mobile SDKs.
   - `timezone_id`: the IANA time zone, for example `America/Sao_Paulo`.
 - The full `User-Agent` is never sent, and neither is any other fingerprinting signal (screen size, fonts, canvas, memory). A value the browser cannot tell is left out, never sent empty. The server needs no change. A failure to read them or to send them never fails `init` or the registration; it is tried again at the next `init`.
-- Browsers registered by an earlier version send the three values once, at their next `init`.
+- Browsers registered by an earlier version send the three values once, at their next `init`. The check for a changed value runs in the background, so it never delays `init`; the browser is given 300 ms to reveal the OS version, and a version already reported is never replaced by the bare family (a slow answer does not turn `macOS 15` into `macOS`).
+- iOS 26 keeps the OS in its User-Agent at `18_6`, so that value is not trusted: the version comes from Safari's own `Version/NN` when there is one, and a Home Screen web app, which has none, reports `iOS` alone.
+- A time zone that is not a plausible IANA id (a tampered `Intl`) is not sent, so one bad value cannot make the server refuse `sdk_name` and `sdk_version` with it.
 
 ## 0.2.0 (2026-11-13)
 

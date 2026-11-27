@@ -4,7 +4,7 @@ Official Web SDK for [Notti](https://github.com/zeeplabs/zeep-notti) push notifi
 browsers through the Web Push protocol (RFC 8030) with VAPID (RFC 8292) and `aes128gcm` payload
 encryption (RFC 8291).
 
-> **Status: `0.x`, first public release.** The API can still change between minor versions. Validated
+> **Status: `0.x`.** The API can still change between minor versions. Validated
 > so far on Chrome desktop against a real Notti server and real FCM; Safari, iOS, Chrome Android,
 > Firefox and Edge are not validated yet, and a real click on a notification has not been exercised.
 
