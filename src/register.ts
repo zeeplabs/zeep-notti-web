@@ -2,6 +2,7 @@ import { createDevice, patchDevice, sdkFields } from './devices';
 import {
   collectEnvironment,
   environmentChanged,
+  keepKnownVersion,
   type Environment,
 } from './environment';
 import { nowOf, type Runtime, type SdkState } from './runtime';
@@ -57,14 +58,16 @@ export async function ensureRegistered(
     stored.publicKey === state.publicKey
   ) {
     // Nothing to register, but an sdk PATCH or a profile change that failed
-    // earlier is still owed to the server, and so is an OS, language or time
-    // zone that changed since the last one it acknowledged.
-    const environment = await collectEnvironment(runtime.env);
-    if (
-      stored.sdkSynced === false ||
-      environmentChanged(stored.reported, environment)
-    ) {
-      await reportSdkFields(runtime, state.config, stored, environment);
+    // earlier is still owed to the server.
+    if (stored.sdkSynced === false) {
+      await reportSdkFields(runtime, state.config, stored);
+    } else {
+      // An OS, language or time zone that changed since the last one the
+      // server acknowledged is sent in the background: reading it can wait for
+      // the browser, and init must not wait for something this accessory.
+      void reportEnvironmentChange(runtime, state.config, stored).catch(
+        () => undefined
+      );
     }
     await flushProfile(runtime, state.config, stored);
     return stored.id;
@@ -99,6 +102,21 @@ export async function ensureRegistered(
   return id;
 }
 
+/** Sends the sdk fields again only if the browser's environment changed. */
+async function reportEnvironmentChange(
+  runtime: Runtime,
+  config: ApiConfig,
+  device: StoredDevice
+): Promise<void> {
+  const environment = keepKnownVersion(
+    device.reported,
+    await collectEnvironment(runtime.env)
+  );
+  if (environmentChanged(device.reported, environment)) {
+    await reportSdkFields(runtime, config, device, environment);
+  }
+}
+
 /**
  * Sends sdk_name, sdk_version and the browser's OS, language and time zone;
  * marks the stored Device synced on success. Never throws.
@@ -110,7 +128,10 @@ async function reportSdkFields(
   collected?: Environment
 ): Promise<void> {
   try {
-    const environment = collected ?? (await collectEnvironment(runtime.env));
+    const environment = keepKnownVersion(
+      device.reported,
+      collected ?? (await collectEnvironment(runtime.env))
+    );
     const fields = await sdkFields(runtime.env, environment);
     await withRetry(
       () =>
@@ -123,12 +144,22 @@ async function reportSdkFields(
         ),
       runtime.sleep
     );
+    // The record as it is now: the worker may have re-registered, or another
+    // tab written it, while the browser was read and the PATCH was in flight.
+    const latest = await runtime.store.get<StoredDevice>(DEVICE_KEY);
+    if (
+      !latest ||
+      latest.id !== device.id ||
+      latest.endpoint !== device.endpoint
+    ) {
+      return;
+    }
     // The PATCH is also a sign of life.
     await runtime.store.set(DEVICE_KEY, {
-      ...device,
+      ...latest,
       sdkSynced: true,
       // Fields the browser could not tell stay as they were reported.
-      reported: { ...device.reported, ...environment },
+      reported: { ...latest.reported, ...environment },
       seenAt: nowOf(runtime),
     });
   } catch {

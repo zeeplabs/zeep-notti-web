@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { BrowserEnv } from '../src/capabilities';
-import { collectEnvironment, environmentChanged } from '../src/environment';
+import {
+  collectEnvironment,
+  environmentChanged,
+  keepKnownVersion,
+} from '../src/environment';
 
 type Nav = NonNullable<BrowserEnv['navigator']>;
 
@@ -231,6 +235,22 @@ describe('collectEnvironment: language and time zone', () => {
     expect(result.timezone_id).toBe('America/Sao_Paulo');
   });
 
+  it.each(['x'.repeat(129), 'America/Sao Paulo', 'a\nb', '<script>'])(
+    'omits a time zone that is not a plausible IANA id %j',
+    async (zone) => {
+      expect(await collectEnvironment(env({}, zone))).not.toHaveProperty(
+        'timezone_id'
+      );
+    }
+  );
+
+  it.each(['Etc/GMT+5', 'America/Argentina/Buenos_Aires', 'UTC'])(
+    'keeps the IANA id %s',
+    async (zone) => {
+      expect((await collectEnvironment(env({}, zone))).timezone_id).toBe(zone);
+    }
+  );
+
   it('omits an empty or missing time zone', async () => {
     expect(await collectEnvironment(env({}, ''))).not.toHaveProperty(
       'timezone_id'
@@ -299,6 +319,49 @@ describe('collectEnvironment: minimisation', () => {
       const { device_os } = await collectEnvironment(env(nav));
       if (device_os) expect(device_os).toMatch(/^[A-Za-z]+(?: \d{1,3})?$/);
     }
+  });
+});
+
+describe('iOS 26 keeps the OS in the User-Agent at 18_6', () => {
+  const frozen = (tail: string) =>
+    `Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) ${tail}`;
+  it('takes the major from Safari Version/', async () => {
+    const nav = {
+      userAgent: frozen('Version/26.0 Mobile/15E148 Safari/604.1'),
+    };
+    expect((await collectEnvironment(env(nav))).device_os).toBe('iOS 26');
+  });
+  it('sends the family alone for a Home Screen web app (no Version/)', async () => {
+    const nav = { userAgent: frozen('Mobile/15E148') };
+    expect((await collectEnvironment(env(nav))).device_os).toBe('iOS');
+  });
+  it('still trusts other 18.x values', async () => {
+    const nav = {
+      userAgent: frozen('Mobile/15E148').replace('18_6', '18_5'),
+    };
+    expect((await collectEnvironment(env(nav))).device_os).toBe('iOS 18');
+  });
+});
+
+describe('keepKnownVersion', () => {
+  it('drops a bare family that the reported version already covers', () => {
+    expect(
+      keepKnownVersion(
+        { device_os: 'macOS 15' },
+        { device_os: 'macOS', language: 'pt' }
+      )
+    ).toEqual({ language: 'pt' });
+  });
+  it('keeps a version, a different family and a first report', () => {
+    expect(
+      keepKnownVersion({ device_os: 'macOS 15' }, { device_os: 'macOS 16' })
+    ).toEqual({ device_os: 'macOS 16' });
+    expect(
+      keepKnownVersion({ device_os: 'macOS 15' }, { device_os: 'Linux' })
+    ).toEqual({ device_os: 'Linux' });
+    expect(keepKnownVersion(undefined, { device_os: 'macOS' })).toEqual({
+      device_os: 'macOS',
+    });
   });
 });
 

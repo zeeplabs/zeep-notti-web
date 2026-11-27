@@ -20,7 +20,10 @@ export interface Environment {
 }
 
 /** How long to wait for the browser to answer a high entropy hint. */
-const HINT_TIMEOUT_MS = 1000;
+const HINT_TIMEOUT_MS = 300;
+
+/** The server rejects a profile field longer than 128 bytes with a 422. */
+const IANA_ZONE = /^[A-Za-z0-9_+\-/]{1,128}$/;
 
 const MAJOR = /^(\d{1,3})(?:[._]|$)/;
 
@@ -74,8 +77,18 @@ function osFromUserAgent(
   nav: NonNullable<BrowserEnv['navigator']>
 ): string | undefined {
   const ua = nav.userAgent ?? '';
-  const ios = /\b(?:iPhone|iPad|iPod)\b.*?\bOS (\d{1,3})[._]/.exec(ua);
-  if (ios) return withVersion('iOS', Number(ios[1]));
+  const ios = /\b(?:iPhone|iPad|iPod)\b.*?\bOS (\d{1,3})[._](\d{1,3})/.exec(ua);
+  if (ios) {
+    const osMajor = Number(ios[1]);
+    // From iOS 26 Safari keeps the OS in the UA at 18_6 (the last 18.x), so
+    // 18_6 cannot be trusted. Safari's own "Version/NN" tracks the iOS major;
+    // a Home Screen web app has none, and then only the family is known.
+    if (osMajor === 18 && Number(ios[2]) === 6) {
+      const safari = /\bVersion\/(\d{1,3})[._]/.exec(ua);
+      return withVersion('iOS', safari ? Number(safari[1]) : undefined);
+    }
+    return withVersion('iOS', osMajor);
+  }
   if (/\b(?:iPhone|iPad|iPod)\b/.test(ua)) return 'iOS';
   // iPadOS 13+ presents itself as a Mac with a touch screen.
   if (nav.platform === 'MacIntel' && (nav.maxTouchPoints ?? 0) > 1) {
@@ -140,7 +153,9 @@ function readTimezone(env: BrowserEnv): string | undefined {
   const zone = env.Intl?.DateTimeFormat().resolvedOptions().timeZone;
   if (typeof zone !== 'string') return undefined;
   const trimmed = zone.trim();
-  return trimmed || undefined;
+  // An overlong or odd value (a tampered or polyfilled Intl) would make the
+  // server refuse the whole PATCH, sdk_name and sdk_version included.
+  return IANA_ZONE.test(trimmed) ? trimmed : undefined;
 }
 
 /**
@@ -184,4 +199,22 @@ export function environmentChanged(
   return (['device_os', 'language', 'timezone_id'] as const).some(
     (key) => current[key] !== undefined && current[key] !== reported?.[key]
   );
+}
+
+/**
+ * Keeps a version the server already has when this read only got the family:
+ * a slow or refused hint must not turn "macOS 15" into "macOS" and back.
+ */
+export function keepKnownVersion(
+  reported: Environment | undefined,
+  current: Environment
+): Environment {
+  const before = reported?.device_os;
+  const now = current.device_os;
+  if (before && now && !now.includes(' ') && before.startsWith(`${now} `)) {
+    const rest = { ...current };
+    delete rest.device_os;
+    return rest;
+  }
+  return current;
 }
